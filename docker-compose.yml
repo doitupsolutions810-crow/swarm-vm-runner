@@ -1,0 +1,120 @@
+name: swarm-vm
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  coordinator:
+    build:
+      context: ./coordinator
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      SWARM_TENANT: ${SWARM_TENANT:-control12}
+      PRODUCTION: ${PRODUCTION:-0}
+      PORT: 4100
+    ports:
+      - "${COORDINATOR_PORT:-4100}:4100"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - swarm-data:/var/swarm
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+
+  worker-debugger:
+    build: { context: ./worker }
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ROLE: debugger
+      SWARM_TENANT: ${SWARM_TENANT:-control12}
+    depends_on:
+      coordinator:
+        condition: service_healthy
+
+  worker-coder:
+    build: { context: ./worker }
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ROLE: coder
+      SWARM_TENANT: ${SWARM_TENANT:-control12}
+    depends_on:
+      coordinator:
+        condition: service_healthy
+
+  worker-tester:
+    build: { context: ./worker }
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ROLE: tester
+      SWARM_TENANT: ${SWARM_TENANT:-control12}
+    depends_on:
+      coordinator:
+        condition: service_healthy
+
+  worker-governance:
+    build: { context: ./worker }
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ROLE: governance
+      SWARM_TENANT: ${SWARM_TENANT:-control12}
+    depends_on:
+      coordinator:
+        condition: service_healthy
+
+  content:
+    profiles: ["content"]
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${CONTENT_PORT:-8088}:80"
+    volumes:
+      - swarm-data:/usr/share/nginx/html/artifacts:ro
+      - ./content/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./content/www:/usr/share/nginx/html:ro
+
+  runner:
+    profiles: ["runner"]
+    build: { context: ./runner }
+    restart: unless-stopped
+    environment:
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}
+      GITHUB_RUNNER_NAME: ${GITHUB_RUNNER_NAME:-control12-swarm-1}
+      GITHUB_RUNNER_LABELS: ${GITHUB_RUNNER_LABELS:-self-hosted,linux,x64,control12,swarm}
+      GITHUB_RUNNER_TOKEN: ${GITHUB_RUNNER_TOKEN}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      PRODUCTION: ${PRODUCTION:-0}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      coordinator:
+        condition: service_healthy
+
+  vm-maintain:
+    profiles: ["vm"]
+    build: { context: ./vm }
+    restart: unless-stopped
+    environment:
+      SWARM_DATA: /var/swarm
+    volumes:
+      - swarm-data:/var/swarm
+    depends_on:
+      coordinator:
+        condition: service_healthy
+
+volumes:
+  swarm-data:

@@ -1,0 +1,4 @@
+.env
+*.pem
+*.token
+node_modules/
