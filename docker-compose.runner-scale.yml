@@ -1,0 +1,15 @@
+# Extra ephemeral runners. Each needs its own name and registration token.
+#   docker compose --profile runner -f docker-compose.yml -f docker-compose.runner-scale.yml up --build
+services:
+  runner-2:
+    profiles: ["runner"]
+    build:
+      context: ./runner
+    restart: unless-stopped
+    environment:
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}
+      GITHUB_RUNNER_NAME: ${GITHUB_RUNNER_NAME_2:-control12-swarm-2}
+      GITHUB_RUNNER_LABELS: ${GITHUB_RUNNER_LABELS:-self-hosted,linux,x64,control12,swarm}
+      GITHUB_RUNNER_TOKEN: ${GITHUB_RUNNER_TOKEN_2:-${GITHUB_RUNNER_TOKEN}}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
