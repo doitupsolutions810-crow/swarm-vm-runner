@@ -1,0 +1,17 @@
+{
+  "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sha256": "db1d3f51c365ebcad5c5eb1e54ecec3795b11b75e3a92eaf89af6ac96e6349f6",
+  "payload": {
+    "type": "system_success",
+    "tenant": "control12",
+    "mode": "degraded",
+    "required_passed": 6,
+    "failed": 0,
+    "degraded": ["github_hosted_actions_runner_id_0"],
+    "chain": ["debugger", "coder", "tester", "governance"],
+    "jobs": ["job-1", "job-2"],
+    "coordinator": "http://127.0.0.1:4100",
+    "at": "2026-09-17T19:29:54Z",
+    "note": "Hosted Actions not required. Swarm role chain completed without in-process eval."
+  }
+}
