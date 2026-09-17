@@ -76,6 +76,16 @@ services:
       coordinator:
         condition: service_healthy
 
+  internal-runner:
+    build: { context: ./internal-runner }
+    restart: unless-stopped
+    environment:
+      COORDINATOR_URL: http://coordinator:4100
+      INTERNAL_RUNNER_NAME: ${INTERNAL_RUNNER_NAME:-control12-internal-1}
+    depends_on:
+      coordinator:
+        condition: service_healthy
+
   content:
     profiles: ["content"]
     image: nginx:1.27-alpine
