@@ -1,0 +1,12 @@
+{
+  "prev": "db1d3f51c365ebcad5c5eb1e54ecec3795b11b75e3a92eaf89af6ac96e6349f6",
+  "payload": {
+    "type": "internal_runner_launch",
+    "runner": "control12-internal-1",
+    "coordinator": "http://127.0.0.1:4100",
+    "content": "http://127.0.0.1:8088/",
+    "allowlist": ["prove-success", "health-probe", "inventory"],
+    "sample": {"id": "run-1", "kind": "inventory", "status": "completed"},
+    "at": "2026-09-17T19:37:18Z"
+  }
+}
