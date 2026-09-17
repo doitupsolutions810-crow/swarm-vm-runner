@@ -1,0 +1,13 @@
+[Unit]
+Description=CONTROL12 swarm VM compose stack
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/swarm-vm-runner
+ExecStart=/usr/bin/docker compose --profile content up -d --build
+ExecStop=/usr/bin/docker compose --profile content down
+TimeoutStartSec=0
+[Install]
+WantedBy=multi-user.target

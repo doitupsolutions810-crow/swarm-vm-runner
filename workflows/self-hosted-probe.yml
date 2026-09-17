@@ -1,0 +1,11 @@
+name: self-hosted swarm probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: [self-hosted, linux, control12]
+    steps:
+      - name: Prove runner assignment
+        run: |
+          echo "runner=${RUNNER_NAME}"
+          uname -a
