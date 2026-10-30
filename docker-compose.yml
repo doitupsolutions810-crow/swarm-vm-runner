@@ -100,7 +100,10 @@ services:
   runner:
     profiles: ["runner"]
     build: { context: ./runner }
-    restart: unless-stopped
+    # Ephemeral registrations are single-use; do not restart with a consumed token.
+    restart: "no"
+    init: true
+    stop_grace_period: 30s
     environment:
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}
       GITHUB_RUNNER_NAME: ${GITHUB_RUNNER_NAME:-control12-swarm-1}
