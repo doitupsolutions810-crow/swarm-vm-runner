@@ -9,4 +9,6 @@ if [[ -z "$token" ]]; then echo "FAIL_CLOSED: GITHUB_RUNNER_TOKEN is required" >
 url="https://github.com/${repo}"
 cd /home/runner
 ./config.sh --unattended --replace --ephemeral --url "$url" --token "$token" --name "$name" --labels "$labels"
+# Registration tokens are single-use. Remove them from the runner process environment.
+unset token GITHUB_RUNNER_TOKEN
 exec ./run.sh
