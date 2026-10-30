@@ -106,10 +106,9 @@ services:
       GITHUB_RUNNER_NAME: ${GITHUB_RUNNER_NAME:-control12-swarm-1}
       GITHUB_RUNNER_LABELS: ${GITHUB_RUNNER_LABELS:-self-hosted,linux,x64,control12,swarm}
       GITHUB_RUNNER_TOKEN: ${GITHUB_RUNNER_TOKEN}
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
       PRODUCTION: ${PRODUCTION:-0}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+    # Deliberately no Docker socket: a workflow must not control the host daemon.
+    # This runner is not suitable for jobs requiring Docker-in-Docker/build access.
     depends_on:
       coordinator:
         condition: service_healthy
