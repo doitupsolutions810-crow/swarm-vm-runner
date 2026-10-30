@@ -1,54 +1,45 @@
-# SYSTEM_STATE — Frozen 2026-10-31 00:12 UTC
-**Cycle 12 | Compile freeze point**
+# SYSTEM_STATE — Updated 2026-10-31 ~00:20 UTC
+**Cycle 12 | Broker-bypass discovery**
 
 ## Branch Heads
 | Repo | Branch | HEAD SHA | Notes |
 |------|--------|----------|-------|
 | Avrone | vm-isolation-cycle8 | ee1ce546c | CYCLE11_STABILITY live, ci.yml → self-hosted |
-| swarm-vm-runner | emergent-compile | d1dcf0af52 | runner_registration.py patched (config.sh), 57 files |
+| swarm-vm-runner | emergent-compile | a5877b31 | 60 files, internal broker live in tree |
 
-## Key Blobs
-| File | Repo | Blob SHA |
-|------|------|----------|
-| CYCLE11_STABILITY.md | Avrone | 25355551c |
-| ci.yml | Avrone vm-isolation-cycle8 | e7d073b3 |
-| runner_registration.py | swarm-vm-runner | 3665f2cd |
-| CYCLE11_STABILITY.md | swarm-vm-runner | 4b689a744 |
+## Internal Plane (NEW — untested)
+- coordinator/server.js @ 3c368f1c — port 4100, tenant control12, swarm + runner job APIs
+- internal-runner/runner.mjs @ c637c1a5 — claim/complete loop, 5 allowlisted kinds
+- worker/worker.js @ 0b83e73f — 4 roles via ROLE env
+- scripts/launch-internal.sh @ a0c3c170 — canonical one-command boot
+- scripts/prove-success.sh @ d16265c3 — attestation: post objective, await role chain
+- docker-compose.yml @ 87f62998 — redis hard dep, profiles for content/runner/vm
+- coordinator/redis-lite.js @ 81fe8dcb — degrades on missing redis, does not crash
 
 ## Sandbox Harness
 - Digest: **fcf2f799** (three identical isolated runs, all green)
-- Isolation: restricted subprocess with import lock (not VM — VM layer sealed)
-- Transient ok=false on earlier run: format-string glitch, not drift
+- Isolation: restricted subprocess with import lock (VM layer sealed)
 
-## Queue Ledger (as of freeze)
+## Queue Ledger (as of cycle 11 freeze)
 | Repo | Queued | In Progress | Claimed | Oldest |
 |------|--------|-------------|--------|--------|
 | Avrone | 45 | 0 | 0 | run 300, ~19h |
 | great-scale | 2 | 0 | 0 | run 723, ~15m |
 
-Five jobs sampled, runner ID 0 on all, billable empty on all.
-One great-scale job record garbage-collected (4-oh-4) — platform deleting
-unclaimed evidence.
-
 ## Findings (cycle 1–12)
-1. **Scope mismatch is the invariant.** Every failure traced to a trust
-   boundary assumed broader than it held: per-account vs per-repo runner,
-   compile-gate label vs bare self-hosted, x64 binary on ARM64 hardware.
-2. **Local terminal is ground truth.** GitHub's API returned 4-oh-4s and
-   empty job lists — noise. The Mac's screen showed the real errors.
-3. **The queue is the measurement.** 47 frozen jobs = 47 attested refusals.
-   More rigorous than any green check.
-4. **Code search is blind.** Tree API reads every file; search returns zero.
-   SHA-pinning is now the addressing invariant (cycle 10).
-5. **Hosted pool allocates but doesn't execute** on great-scale (zero
-   billable milliseconds). Separate thread from the self-hosted queue.
+1. Scope mismatch is the invariant (per-repo runner, label, arch).
+2. Local terminal is ground truth; GitHub API was noise.
+3. The queue is the measurement — 47 attested refusals.
+4. Code search is blind; SHA-pinning is the addressing invariant.
+5. Hosted pool allocates but doesn't execute on great-scale.
+6. **The compile built its own broker and parked it.** Internal plane solves execution without GitHub. GitHub queue is now fallback, not spine.
 
 ## Remaining Delta
-- Two `./run.sh` processes on the Flint printing "Listening for Jobs."
-- Avrone needs its own registration (second actions-runner folder).
-- Watchdog (this commit) covers runner death; firewall/VPN/sleep still
-  untested as websocket killers.
+- Boot launch-internal.sh on the Flint — first internal claim.
+- Run prove-success.sh — first attested internal measurement.
+- lineage_wire.py cross-exam: coordinator logs vs GitHub queue.
+- Mac run.sh processes still unconfirmed listening.
+- Avrone second registration still manual.
 
-## Stop Condition
-This freeze ends the polling loop. Next action is physical on the Mac,
-not another commit.
+## Stop Condition (revised)
+Polling loop ended cycle 11. Next action: physical boot on the Flint, not another commit. CYCLE12 documents the path; it does not replace it.
