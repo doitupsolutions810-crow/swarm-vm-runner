@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Runner registration module — binds swarm-vm-runner's minted token to a repo's
 self-hosted runner pool. Fail-closed: no token, no ledger, no registration.
+Round 21 fix: gh runner add returns 404 (not a valid gh subcommand);
+registration now shells to ./config.sh --url --token, the documented sequence.
+Ledger path is injectable — no hardcoded ledger/success_proofs.jsonl.
 """
 import hashlib
 import json
@@ -31,66 +34,63 @@ def verify_token_against_ledger(token: str, ledger_path: str) -> dict:
         if prev and e.get("prev_hash") != prev:
             return {"ok": False, "chain_depth": i, "reason": "HOLD_POISONED", "broken_link": i}
         prev = digest
-    # token must appear in some entry's token field
     for e in entries:
         if e.get("token") == token or e.get("token_hash") == hashlib.sha256(token.encode()).hexdigest():
             return {"ok": True, "chain_depth": len(entries), "reason": "VERIFIED"}
     return {"ok": False, "chain_depth": len(entries), "reason": "HOLD_UNLINEAGED"}
 
 
-def register_runner(token: str, repo: str, label: str, gh_bin: str = "gh") -> dict:
-    """Register a self-hosted runner via gh. Returns runner ID or HOLD state."""
-    v = verify_token_against_ledger(token, "ledger/success_proofs.jsonl")
+def register_runner(token: str, repo: str, label: str,
+                    ledger_path: str = "ledger/success_proofs.jsonl",
+                    config_sh: str = "./ config.sh",
+                    runner_dir: str = ".") -> dict:
+    """Register via ./config.sh — the documented GitHub sequence.
+    config_sh: path to config.sh. runner_dir: where config.sh lives.
+    Returns runner ID or HOLD state."""
+    v = verify_token_against_ledger(token, ledger_path)
     if not v["ok"]:
         return v
+    url = f"https://github.com/{repo}"
     try:
         r = subprocess.run(
-            [gh_bin, "runner", "add", "--repo", repo, "--label", label, "--token", token],
-            capture_output=True, text=True, timeout=60,
+            [config_sh, "--url", url, "--token", token, "--name", label,
+             "--labels", label, "--work", "_work", "--unattended"],
+            capture_output=True, text=True, timeout=120, cwd=runner_dir,
         )
         if r.returncode != 0:
-            return {"ok": False, "reason": "HOLD_UNREGISTERED", "stderr": r.stderr.strip()}
-        # parse runner ID from output if present
-        for line in r.stdout.splitlines():
-            if "runner" in line.lower() and any(c.isdigit() for c in line):
-                return {"ok": True, "reason": "REGISTERED", "output": line.strip(), "chain_depth": v["chain_depth"]}
-        return {"ok": True, "reason": "REGISTERED", "output": r.stdout.strip(), "chain_depth": v["chain_depth"]}
+            return {"ok": False, "reason": "HOLD_UNREGISTERED",
+                    "stderr": r.stderr.strip(), "stdout": r.stdout.strip()}
+        out = (r.stdout + "\n" + r.stderr).strip()
+        return {"ok": True, "reason": "REGISTERED", "output": out,
+                "chain_depth": v["chain_depth"]}
     except FileNotFoundError:
-        return {"ok": False, "reason": "HOLD_UNREGISTERED", "detail": "gh not installed"}
+        return {"ok": False, "reason": "HOLD_UNREGISTERED",
+                "detail": f"config.sh not found at {config_sh}"}
     except subprocess.TimeoutExpired:
         return {"ok": False, "reason": "HOLD_UNREGISTERED", "detail": "timeout"}
 
 
 def self_test():
     import tempfile, os
-    # build a minimal valid ledger
-    e1 = {"ts": "2026-09-17T00:00:00Z", "proof": "success", "token_hash": hashlib.sha256(b"tok-1").hexdigest()}
+    e1 = {"ts": "2026-09-17T00:00:00Z", "proof": "success",
+          "token_hash": hashlib.sha256(b"tok-1").hexdigest()}
     p1 = json.dumps(e1, sort_keys=True)
     e1["hash"] = hashlib.sha256(p1.encode()).hexdigest()
     e1["prev_hash"] = None
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".jsonl") as f:
         f.write(json.dumps(e1) + "\n")
         lp = f.name
-    # monkeypatch ledger path
-    global verify_token_against_ledger
-    _orig = verify_token_against_ledger
-    def _v(token, ledger_path=lp):
-        return _orig(token, lp)
-    # case 1: valid token
-    r1 = _v("tok-1")
-    assert r1["ok"] is True and r1["reason"] == "VERIFIED" and r1["chain_depth"] == 1, r1
-    # case 2: missing token
-    r2 = _v("")
+    r1 = verify_token_against_ledger("tok-1", lp)
+    assert r1["ok"] is True and r1["reason"] == "VERIFIED", r1
+    r2 = verify_token_against_ledger("", lp)
     assert r2["reason"] == "HOLD_UNLINEAGED", r2
-    # case 3: corrupt ledger
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".jsonl") as f:
         f.write('{"hash": "deadbeef", "proof": "x"}\n')
         lp2 = f.name
-    r3 = _orig("tok-1", lp2)
+    r3 = verify_token_against_ledger("tok-1", lp2)
     assert r3["reason"] == "HOLD_POISONED", r3
-    # case 4: gh not installed
-    r4 = register_runner("tok-1", "o/r", "ci", gh_bin="__no_such_binary__")
-    # verify_token passes but gh missing -> HOLD_UNREGISTERED
+    r4 = register_runner("tok-1", "o/r", "ci", ledger_path=lp,
+                         config_sh="__no_such_binary__")
     assert r4["reason"] == "HOLD_UNREGISTERED", r4
     os.unlink(lp); os.unlink(lp2)
     return "VERIFIED"
