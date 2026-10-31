@@ -68,6 +68,10 @@ const server = http.createServer(async (req, res) => {
       const payload = await readJson(req);
       const job = jobs.get(payload.jobId);
       if (!job) return json(res, 404, { error: "unknown job" });
+      if (job.status === "completed" || job.status === "failed") return json(res, 409, { error: "job already terminal" });
+      if (payload.status !== "passed" && payload.status !== "failed") return json(res, 400, { error: "event status must be passed or failed" });
+      const expectedRole = ROLES[job.step];
+      if (payload.role !== expectedRole) return json(res, 409, { error: "out-of-order role", expected: expectedRole, received: payload.role });
       job.events.push({ role: payload.role, status: payload.status, note: String(payload.note || "").slice(0, 500), at: new Date().toISOString() });
       if (payload.status === "passed" && job.step < ROLES.length - 1) {
         job.step += 1; job.status = "running"; await redis.lpush(`swarm:${TENANT}:${ROLES[job.step]}`, job.id);

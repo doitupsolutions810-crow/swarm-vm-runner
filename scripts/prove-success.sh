@@ -9,7 +9,7 @@ pass() { echo "  PASS: $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 degraded() { echo "  DEGRADED: $1"; DEGRADED=$((DEGRADED+1)); }
 echo "=========================================="
-echo " SWARM VM — PROVE SYSTEM SUCCESS"
+echo " SWARM VM — LOCAL EXECUTION PROOF"
 echo "=========================================="
 [[ -f "$ROOT/docker-compose.yml" ]] && pass "compose file" || fail "compose file"
 [[ -f "$ROOT/runner/entrypoint.sh" ]] && pass "runner entrypoint" || fail "runner entrypoint"
@@ -62,11 +62,10 @@ else
   degraded "coordinator not listening"
 fi
 
-degraded "GitHub-hosted Actions are not part of this local proof"
 echo "=========================================="
 echo " RESULT: $PASS passed, $FAIL failed, $DEGRADED degraded"
 if [[ "$FAIL" -eq 0 && "$DEGRADED" -eq 0 ]]; then
-  echo " SYSTEM SUCCESS"
+  echo " LOCAL EXECUTION PROOF PASSED (GitHub CI is a separate gate)"
   exit 0
 fi
 echo " SYSTEM NOT READY"
