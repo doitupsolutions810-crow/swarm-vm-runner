@@ -1,0 +1,28 @@
+name: Swarm VM CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swarm-vm-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coordinator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax-check operational scripts
+        run: bash -n scripts/prove-success.sh runner/entrypoint.sh
+      - name: Test coordinator role ordering and job lifecycle
+        run: node --test coordinator/test/*.test.js
