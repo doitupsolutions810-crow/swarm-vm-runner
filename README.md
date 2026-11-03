@@ -36,7 +36,7 @@ for name in SWARM_API_TOKEN SWARM_READ_TOKEN SWARM_RUNNER_TOKEN SWARM_DEBUGGER_T
 done
 ```
 
-The coordinator persists job and runner state to an fsync-backed JSONL journal on the mounted `swarm-data` volume, recovers queued work after restart, and rejects stale runner claim tokens. It rejects oversized or malformed request bodies, enforces the
+The coordinator persists job and runner state to an fsync-backed JSONL journal on the mounted `swarm-data` volume, compacts it after 500 records by default, recovers queued work after restart, and rejects stale runner claim tokens. It rejects oversized or malformed request bodies, enforces the
 debugger → coder → tester → governance transition order, rejects duplicate or
 terminal-state reports, and binds runner completion to the runner that claimed
 the job. These controls harden the coordinator protocol; they do not make the
