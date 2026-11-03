@@ -1,5 +1,8 @@
 import test, { before, after, beforeEach } from "node:test";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { createServer } from "./server.js";
