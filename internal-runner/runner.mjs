@@ -14,7 +14,7 @@ async function claim() {
   return res.json();
 }
 async function complete(id, result) {
-  await fetch(`${COORDINATOR}/api/runner/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, runner: NAME, ...result }) });
+  await fetch(`${COORDINATOR}/api/runner/complete`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ id, runner: NAME, ...result }) });
 }
 function safeQuery(raw) {
   const q = String(raw || "").trim().slice(0, 80);
@@ -52,7 +52,7 @@ async function search(job) {
 }
 async function spawnSubagent(job) {
   const objective = String(job.objective || job.query || "spawned by internal runner").slice(0, 2000);
-  const res = await fetch(`${COORDINATOR}/api/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective }) });
+  const res = await fetch(`${COORDINATOR}/api/jobs`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ objective }) });
   if (!res.ok) return { ok: false, note: `spawn failed ${res.status}` };
   const spawned = await res.json();
   return { ok: true, note: `${NAME} spawned ${spawned.id} chain=${(spawned.chain||[]).join(">")}`, spawned };
