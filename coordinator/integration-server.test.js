@@ -148,3 +148,35 @@ test("signed receipt idempotency ledger survives compaction and restart", async 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("journal recovery rejects a correctly signed receipt with a broken previous-receipt link", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-receipt-chain-break-"));
+  const instance = await start(dir);
+  try {
+    const firstRequest = makeRequest();
+    const first = await post(instance.base, firstRequest);
+    assert.equal(first.status, 202);
+    const secondRequest = makeRequest({ objective: "second durable action", action: { type: "Execute", resource: "swarm.jobs", method: "POST" } });
+    const changedEnvelope = { ...secondRequest.envelope, message_id: "message-integration-2", correlation_id: "correlation-integration-2" };
+    delete changedEnvelope.signature;
+    secondRequest.envelope = { ...changedEnvelope, signature: signObject(changedEnvelope, issuerKeys.privateKey) };
+    const second = await post(instance.base, secondRequest);
+    assert.equal(second.status, 202);
+    await stop(instance.server);
+    const journal = path.join(dir, "coordinator.jsonl");
+    const records = fs.readFileSync(journal, "utf8").trim().split("\\n").map((line) => JSON.parse(line));
+    const secondRecord = records.find((record) => record.type === "integration-enqueue" && record.message_id === "message-integration-2");
+    assert.ok(secondRecord);
+    const alteredReceipt = { ...secondRecord.receipt, previous_receipt_digest: null };
+    delete alteredReceipt.signature;
+    secondRecord.receipt = { ...alteredReceipt, signature: signObject(alteredReceipt, receiptKeys.privateKey) };
+    fs.writeFileSync(journal, records.map((record) => JSON.stringify(record)).join("\\n") + "\\n");
+    assert.throws(() => createServer({
+      token: API_TOKEN, readToken, runnerToken, roleTokens, stateDir: dir,
+      tenant: "integration-test", compactAfterRecords: 500, ...trust,
+    }), /signed receipt chain is broken/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
