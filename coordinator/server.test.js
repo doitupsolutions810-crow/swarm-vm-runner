@@ -474,6 +474,22 @@ test("claim rejects invalid worker identities, lease bounds, and wrong role cred
   assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a" }, token: TOKEN })).status, 401);
 });
 
+test("capacity-rejected worker can safely release its exact active lease", async () => {
+  const job = await createJob("release capacity claim");
+  const claim = await request("/api/worker/debugger/claim", {
+    method: "POST", body: { workerId: "worker-a", leaseMs: 30000 }, token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(claim.status, 200);
+  const releaseBody = { jobId: job.id, tenant: job.tenant, workerId: "worker-a", claimToken: claim.body.claimToken };
+  assert.equal((await request("/api/worker/debugger/release", { method: "POST", body: { ...releaseBody, workerId: "worker-b" }, token: ROLE_TOKENS.debugger })).status, 403);
+  assert.equal((await request("/api/worker/debugger/release", { method: "POST", body: releaseBody, token: ROLE_TOKENS.debugger })).status, 200);
+  const next = await request("/api/worker/debugger/claim", {
+    method: "POST", body: { workerId: "worker-b", leaseMs: 30000 }, token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(next.status, 200);
+  assert.notEqual(next.body.claimToken, claim.body.claimToken);
+});
+
 test("external executor can validate only the current active specialist claim", async () => {
   const job = await createJob("validate executor claim");
   const claim = await request("/api/worker/debugger/claim", {
