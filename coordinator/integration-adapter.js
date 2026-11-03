@@ -51,5 +51,5 @@ export async function authorizeAndEnqueue({ request, trust, nowMs = Date.now(), 
     receipt,
   });
   if (!committed || typeof committed !== "object" || !committed.job) throw new Error("durable commit did not return a job");
-  return { ...committed, receipt };
+  return { ...committed, receipt: committed.receipt || receipt };
 }
