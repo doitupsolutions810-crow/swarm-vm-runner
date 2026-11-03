@@ -49,6 +49,8 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+      - name: Coordinator and four-role smoke contract tests
+        run: npm --prefix coordinator test
       - name: Worker syntax and bridge tests
         run: node --check worker/worker.js && node --check worker/execute.js && node --test worker/execute.test.js
       - name: Shell syntax check
