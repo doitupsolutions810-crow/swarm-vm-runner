@@ -4,7 +4,11 @@ const ENQUEUE_ACTION = Object.freeze({ type: "Execute", resource: "swarm.jobs", 
 
 export async function authorizeAndEnqueue({ request, trust, nowMs = Date.now(), previousReceiptDigest = null, commit }) {
   if (typeof commit !== "function") throw new TypeError("durable commit callback is required");
-  if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("integration request must be an object");
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    const error = new Error("integration request must be an object");
+    error.status = 400;
+    throw error;
+  }
   const { envelope, payload, capability, capability_signature: capabilitySignature } = request;
   const action = payload?.action;
   let envelopeResult;
@@ -20,7 +24,11 @@ export async function authorizeAndEnqueue({ request, trust, nowMs = Date.now(), 
     error.status = 401;
     throw error;
   }
-  if (envelope.capability_id !== capability?.id) throw new Error("envelope capability_id does not match supplied capability");
+  if (envelope.capability_id !== capability?.id) {
+    const error = new Error("envelope capability_id does not match supplied capability");
+    error.status = 403;
+    throw error;
+  }
   let capabilityResult;
   try {
     capabilityResult = verifyCapability({
@@ -36,7 +44,9 @@ export async function authorizeAndEnqueue({ request, trust, nowMs = Date.now(), 
     throw error;
   }
   if (action.type !== ENQUEUE_ACTION.type || action.resource !== ENQUEUE_ACTION.resource || action.method !== ENQUEUE_ACTION.method) {
-    throw new Error("only Execute:swarm.jobs:POST is currently implemented");
+    const error = new Error("only Execute:swarm.jobs:POST is currently implemented");
+    error.status = 501;
+    throw error;
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)
       || typeof payload.objective !== "string" || !payload.objective.trim()
