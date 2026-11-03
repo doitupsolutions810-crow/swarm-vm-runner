@@ -165,13 +165,13 @@ test("journal recovery rejects a correctly signed receipt with a broken previous
     assert.equal(second.status, 202);
     await stop(instance.server);
     const journal = path.join(dir, "coordinator.jsonl");
-    const records = fs.readFileSync(journal, "utf8").trim().split("\\n").map((line) => JSON.parse(line));
+    const records = fs.readFileSync(journal, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     const secondRecord = records.find((record) => record.type === "integration-enqueue" && record.message_id === "message-integration-2");
     assert.ok(secondRecord);
     const alteredReceipt = { ...secondRecord.receipt, previous_receipt_digest: null };
     delete alteredReceipt.signature;
     secondRecord.receipt = { ...alteredReceipt, signature: signObject(alteredReceipt, receiptKeys.privateKey) };
-    fs.writeFileSync(journal, records.map((record) => JSON.stringify(record)).join("\\n") + "\\n");
+    fs.writeFileSync(journal, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
     assert.throws(() => createServer({
       token: API_TOKEN, readToken, runnerToken, roleTokens, stateDir: dir,
       tenant: "integration-test", compactAfterRecords: 500, ...trust,
