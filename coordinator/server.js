@@ -103,6 +103,7 @@ export function createServer({
   let seq = 1;
   let runSeq = 1;
   let persistQueue = Promise.resolve();
+  let stateMutationQueue = Promise.resolve();
 
   if (fs.existsSync(journalPath)) {
     const raw = fs.readFileSync(journalPath, "utf8");
@@ -135,6 +136,12 @@ export function createServer({
       runnerQueue.push(job.id);
       fs.appendFileSync(journalPath, JSON.stringify({ type: "runner-job", job }) + "\n", { mode: 0o600 });
     }
+  }
+
+  function serializeMutation(operationFn) {
+    const operation = stateMutationQueue.then(operationFn);
+    stateMutationQueue = operation.catch(() => {});
+    return operation;
   }
 
   function persist(record) {
@@ -206,25 +213,27 @@ export function createServer({
       }
       if (req.method === "POST" && url.pathname === "/api/events") {
         const payload = req.swarmPayload || await readJson(req);
-        const job = jobs.get(payload.jobId);
-        if (!job) return json(res, 404, { error: "unknown job" });
-        if (job.status === "completed" || job.status === "failed") return json(res, 409, { error: "job is terminal" });
-        const expectedRole = job.chain[job.step];
-        if (payload.role !== expectedRole) return json(res, 409, { error: "role is not next in chain", expectedRole });
-        if (payload.status !== "passed" && payload.status !== "failed") return json(res, 400, { error: "status must be passed or failed" });
-        if (job.events.some((event) => event.role === payload.role)) return json(res, 409, { error: "role already reported" });
-        const next = structuredClone(job);
-        const note = typeof payload.note === "string" ? payload.note.slice(0, 500) : "";
-        next.events.push({ role: payload.role, status: payload.status, note, at: new Date().toISOString() });
-        if (payload.status === "failed") next.status = "failed";
-        else if (next.step < ROLES.length - 1) {
-          next.step += 1;
-          next.status = "running";
-        } else next.status = "completed";
-        jobs.set(next.id, next);
-        try { await persist({ type: "job", job: next }); }
-        catch (error) { jobs.set(job.id, job); throw error; }
-        return json(res, 200, next);
+        const outcome = await serializeMutation(async () => {
+          const job = jobs.get(payload.jobId);
+          if (!job) return { status: 404, body: { error: "unknown job" } };
+          if (job.status === "completed" || job.status === "failed") return { status: 409, body: { error: "job is terminal" } };
+          const expectedRole = job.chain[job.step];
+          if (payload.role !== expectedRole) return { status: 409, body: { error: "role is not next in chain", expectedRole } };
+          if (payload.status !== "passed" && payload.status !== "failed") return { status: 400, body: { error: "status must be passed or failed" } };
+          if (job.events.some((event) => event.role === payload.role)) return { status: 409, body: { error: "role already reported" } };
+          const next = structuredClone(job);
+          const note = typeof payload.note === "string" ? payload.note.slice(0, 500) : "";
+          next.events.push({ role: payload.role, status: payload.status, note, at: new Date().toISOString() });
+          if (payload.status === "failed") next.status = "failed";
+          else if (next.step < ROLES.length - 1) {
+            next.step += 1;
+            next.status = "running";
+          } else next.status = "completed";
+          await persist({ type: "job", job: next });
+          jobs.set(next.id, next);
+          return { status: 200, body: next };
+        });
+        return json(res, outcome.status, outcome.body);
       }
       if (req.method === "GET" && url.pathname === "/api/runner/jobs") return json(res, 200, { jobs: [...runnerJobs.values()] });
       if (req.method === "POST" && url.pathname === "/api/runner/jobs") {
