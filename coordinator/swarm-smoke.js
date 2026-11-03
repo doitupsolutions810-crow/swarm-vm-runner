@@ -92,17 +92,17 @@ export function validateCompletedJob(job, {
       nowMs
     });
   }
-  const [debugger, coder, tester, governance] = job.events.map(event => event.evidence.report);
-  if (typeof debugger.diagnosis !== "string" || !debugger.diagnosis.trim()
-      || typeof debugger.reproduction !== "string" || !debugger.reproduction.trim()) {
+  const [debuggerReport, coderReport, tester, governance] = job.events.map(event => event.evidence.report);
+  if (typeof debuggerReport.diagnosis !== "string" || !debuggerReport.diagnosis.trim()
+      || typeof debuggerReport.reproduction !== "string" || !debuggerReport.reproduction.trim()) {
     throw new Error("debugger report incomplete");
   }
-  if (!Array.isArray(coder.artifacts) || coder.artifacts.length === 0
-      || !coder.artifacts.every(item => typeof item.path === "string" && /^sha256:[a-f0-9]{64}$/.test(item.sha256 || ""))) {
+  if (!Array.isArray(coderReport.artifacts) || coderReport.artifacts.length === 0
+      || !coderReport.artifacts.every(item => typeof item.path === "string" && /^sha256:[a-f0-9]{64}$/.test(item.sha256 || ""))) {
     throw new Error("coder artifacts missing or malformed");
   }
-  if (!expectedArtifacts.length || coder.artifacts.length !== expectedArtifacts.length
-      || !expectedArtifacts.every(expected => coder.artifacts.some(item => item.path === expected.path && item.sha256 === expected.sha256))) {
+  if (!expectedArtifacts.length || coderReport.artifacts.length !== expectedArtifacts.length
+      || !expectedArtifacts.every(expected => coderReport.artifacts.some(item => item.path === expected.path && item.sha256 === expected.sha256))) {
     throw new Error("coder smoke artifact set or exact content hashes do not match");
   }
   if (!Array.isArray(tester.tests) || !tester.tests.length || !tester.tests.every(item => typeof item.command === "string" && item.exit_code === 0)
