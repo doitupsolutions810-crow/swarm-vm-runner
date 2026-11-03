@@ -43,6 +43,8 @@ test("canonical JSON and digest are deterministic and reject unsafe values", () 
   assert.equal(canonicalJson({ z: 1, a: { y: 2, b: 3 } }), '{"a":{"b":3,"y":2},"z":1}');
   assert.equal(digestJson({ a: 1, b: 2 }), digestJson({ b: 2, a: 1 }));
   assert.throws(() => canonicalJson({ value: Number.NaN }), /non-finite/);
+  assert.equal(canonicalJson({ small: 1e-7, large: 1e21, negativeZero: -0, integerFloat: 1.0 }), '{"integerFloat":1,"large":1e+21,"negativeZero":0,"small":1e-7}');
+  assert.throws(() => canonicalJson("\\ud800"), /unpaired Unicode surrogate/);
   const unsafe = JSON.parse('{"__proto__":"x"}');
   assert.throws(() => canonicalJson(unsafe), /unsafe object key/);
 });
