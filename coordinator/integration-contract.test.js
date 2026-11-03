@@ -42,6 +42,7 @@ const receiptFields = (overrides = {}) => ({
 test("canonical JSON and digest are deterministic and reject unsafe values", () => {
   assert.equal(canonicalJson({ z: 1, a: { y: 2, b: 3 } }), '{"a":{"b":3,"y":2},"z":1}');
   assert.equal(digestJson({ a: 1, b: 2 }), digestJson({ b: 2, a: 1 }));
+  assert.equal(canonicalJson("München 東京 🚀"), '"München 東京 🚀"');
   assert.throws(() => canonicalJson({ value: Number.NaN }), /non-finite/);
   assert.equal(canonicalJson({ small: 1e-7, large: 1e21, negativeZero: -0, integerFloat: 1.0 }), '{"integerFloat":1,"large":1e+21,"negativeZero":0,"small":1e-7}');
   assert.throws(() => canonicalJson("\\ud800"), /unpaired Unicode surrogate/);
@@ -84,6 +85,7 @@ test("verifies capability signature and exact action/resource/method/audience", 
   assert.throws(() => verifyCapability({ ...args, action: { ...args.action, method: "DELETE" } }), /does not authorize exact/);
   assert.throws(() => verifyCapability({ ...args, expectedAudience: "spiffe://prod/agent/other" }), /issuer, id, or audience mismatch/);
   assert.throws(() => verifyCapability({ ...args, capability: { ...capability, expires_at: Date.now() / 1000 - 1 } }), /expired, premature/);
+  assert.throws(() => verifyCapability({ ...args, capability: { ...capability, issued_at: true } }), /timestamps must be numbers/);
   assert.throws(() => verifyCapability({ ...args, signature: b64(Buffer.alloc(64)) }), /invalid capability signature/);
 });
 
@@ -94,5 +96,6 @@ test("creates signed receipt and detects tampering and schema drift", () => {
   assert.equal(verifySignedReceipt({ receipt, publicKeyPem }), true);
   assert.throws(() => verifySignedReceipt({ receipt: { ...receipt, outcome: "authorized_not_executed" }, publicKeyPem }), /invalid receipt signature/);
   assert.throws(() => createSignedReceipt({ fields: receiptFields({ previous_receipt_digest: "bad" }), privateKeyPem }), /invalid previous receipt digest/);
+  assert.throws(() => createSignedReceipt({ fields: receiptFields({ method: "delete" }), privateKeyPem }), /method must be uppercase/);
   assert.throws(() => verifySignedReceipt({ receipt: { ...receipt, unrecognized: true }, publicKeyPem }), /fields do not match/);
 });
