@@ -7,7 +7,7 @@ function validateTimeoutMs(value, name) {
 
 export async function executeRoleTask({
   job, role, coordinatorUrl, executorUrl, readToken, roleToken, executorToken,
-  fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000,
+  fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000, claimToken,
 }) {
   executorTimeoutMs = validateTimeoutMs(executorTimeoutMs, "executorTimeoutMs");
   coordinatorTimeoutMs = validateTimeoutMs(coordinatorTimeoutMs, "coordinatorTimeoutMs");
@@ -45,7 +45,7 @@ export async function executeRoleTask({
     report = await fetchImpl(coordinatorUrl + "/api/events", {
       method: "POST",
       headers: { authorization: "Bearer " + roleToken, "content-type": "application/json" },
-      body: JSON.stringify({ jobId: job.id, role, status: expected, note, evidence: result.evidence, evidence_signature: result.evidence_signature }),
+      body: JSON.stringify({ jobId: job.id, role, status: expected, note, evidence: result.evidence, evidence_signature: result.evidence_signature, ...(claimToken ? { claimToken } : {}) }),
       signal: AbortSignal.timeout(coordinatorTimeoutMs),
     });
   } catch (error) {
