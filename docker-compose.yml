@@ -1,22 +1,13 @@
 name: swarm-vm
 
 services:
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   coordinator:
     build:
       context: ./coordinator
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SWARM_TENANT: ${SWARM_TENANT:-control12}
+      SWARM_STATE_DIR: /var/swarm
       SWARM_API_TOKEN: ${SWARM_API_TOKEN}
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_RUNNER_TOKEN: ${SWARM_RUNNER_TOKEN}
@@ -28,9 +19,6 @@ services:
       PORT: 4100
     ports:
       - "${COORDINATOR_BIND_HOST:-127.0.0.1}:${COORDINATOR_PORT:-4100}:4100"
-    depends_on:
-      redis:
-        condition: service_healthy
     volumes:
       - swarm-data:/var/swarm
     healthcheck:
@@ -43,7 +31,6 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: debugger
       SWARM_TENANT: ${SWARM_TENANT:-control12}
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
@@ -56,7 +43,6 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: coder
       SWARM_TENANT: ${SWARM_TENANT:-control12}
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
@@ -69,7 +55,6 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: tester
       SWARM_TENANT: ${SWARM_TENANT:-control12}
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
@@ -82,7 +67,6 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: governance
       SWARM_TENANT: ${SWARM_TENANT:-control12}
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
