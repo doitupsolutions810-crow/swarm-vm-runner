@@ -64,7 +64,7 @@ async function claimRole(coordinator, job, role) {
   assert.equal(response.status, 200);
   const claim = await response.json();
   assert.equal(claim.id, job.id);
-  return { claimToken: claim.claimToken, workerId: claim.lease.workerId };
+  return { tenant: claim.tenant, claimToken: claim.claimToken, workerId: claim.lease.workerId };
 }
 
 async function startGrokMock(responseFactory) {
