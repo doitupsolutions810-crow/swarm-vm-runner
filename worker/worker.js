@@ -30,6 +30,7 @@ async function tick() {
     if (res.status === 204) return;
     if (!res.ok) throw new Error("claim rejected (" + res.status + ")");
     const mine = await res.json();
+    const executionController = new AbortController();
     const heartbeat = setInterval(async () => {
       try {
         const renewed = await fetch(COORDINATOR + "/api/worker/" + ROLE + "/renew", {
@@ -38,16 +39,25 @@ async function tick() {
           body: JSON.stringify({ jobId: mine.id, workerId: WORKER_ID, claimToken: mine.claimToken, leaseMs: LEASE_MS }),
           signal: AbortSignal.timeout(10_000),
         });
-        if (!renewed.ok) console.error(ROLE, mine.id, "lease renewal rejected (" + renewed.status + ")");
+        if (!renewed.ok) {
+          console.error(ROLE, mine.id, "lease renewal rejected (" + renewed.status + "); cancelling execution");
+          executionController.abort(new Error("specialist lease renewal rejected"));
+        }
       } catch (error) {
-        console.error(ROLE, mine.id, "lease renewal unavailable:", error.message);
+        console.error(ROLE, mine.id, "lease renewal unavailable; cancelling execution:", error.message);
+        executionController.abort(error);
       }
     }, Math.floor(LEASE_MS / 3));
-    const result = await executeRoleTask({
-      job: mine, role: ROLE, coordinatorUrl: COORDINATOR, executorUrl: EXECUTOR_URL,
-      readToken: TOKEN, roleToken: ROLE_TOKEN, executorToken: EXECUTOR_TOKEN, claimToken: mine.claimToken,
-    });
-    clearInterval(heartbeat);
+    let result;
+    try {
+      result = await executeRoleTask({
+        job: mine, role: ROLE, coordinatorUrl: COORDINATOR, executorUrl: EXECUTOR_URL,
+        readToken: TOKEN, roleToken: ROLE_TOKEN, executorToken: EXECUTOR_TOKEN,
+        claimToken: mine.claimToken, signal: executionController.signal,
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
     if (!result.reported) {
       console.error(ROLE, mine.id, result.reason || "execution remains pending");
       return;
