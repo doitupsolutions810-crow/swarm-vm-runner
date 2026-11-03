@@ -33,12 +33,25 @@ export function smokeArtifactExpectations(runTag) {
   ];
 }
 
+export function validSmokeBranch(branch) {
+  if (typeof branch !== "string" || branch.length < 1 || branch.length > 64
+      || !/^[A-Za-z0-9._/-]+$/.test(branch)) return false;
+  if (branch.startsWith("/") || branch.endsWith("/") || branch.includes("//")
+      || branch.includes("..") || branch === "@") return false;
+  return branch.split("/").every(component =>
+    component.length > 0
+    && !component.startsWith(".")
+    && !component.endsWith(".")
+    && !component.toLowerCase().endsWith(".lock")
+  );
+}
+
 export function buildSmokeObjective(runTag, repository, branch = "") {
   if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,64}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
   let parsed;
   try { parsed = new URL(String(repository)); } catch { throw new TypeError("SWARM_SMOKE_REPOSITORY must be an HTTPS Git URL"); }
   if (String(repository).length > 256 || parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) throw new TypeError("SWARM_SMOKE_REPOSITORY must be an HTTPS Git URL");
-  if (branch && (typeof branch !== "string" || !/^[A-Za-z0-9._/-]{1,64}$/.test(branch))) throw new TypeError("invalid smoke branch");
+  if (branch !== "" && !validSmokeBranch(branch)) throw new TypeError("invalid smoke branch");
   const { textFile: txt, testFile: spec } = smokeArtifactPaths(runTag);
   const expectedArtifacts = smokeArtifactExpectations(runTag);
   const expectedContent = "swarm execution verified for " + runTag.replace(/[^a-zA-Z0-9_-]/g, "-") + "\n";
