@@ -48,12 +48,31 @@ The coordinator exposes `POST /api/integration/enqueue` for the first signed cro
 
 Trust roots are configured with `SWARM_AVRONE_ISSUER_PUBLIC_KEY_FILE`, `SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64`, `SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE`, `SWARM_AVRONE_ISSUER`, and `SWARM_SERVICE_IDENTITY`. Key files must be mounted inside the coordinator container from an independent secret store; the path variables refer to container paths. Do not commit keys or trust keys supplied in requests. Without all trust material the integration endpoint returns 503. The Capability Authority currently lacks authenticated delegated issuance to a target workload (tracked in its issue #16), so a correctly audience-bound production capability cannot yet be minted through its current API.
 
-**Execution-adapter gap:** the four current role worker containers are still
-protocol stubs. They deliberately report `failed` instead of `passed` until a
-real task executor is configured and returns independently verifiable evidence.
-A completed role-message chain is not proof that code was written, tested, or
-reviewed. Do not promote this swarm to production or connect it to AVRONE as a
-trusted executor yet.
+**Specialist execution bridge:** the four role workers now call Grok Bot's
+authenticated `POST /api/swarm/execute` endpoint. Grok Bot runs each role through
+its real agent runtime and hardened terminal sandbox, captures actual terminal
+results, hashes changed Git files, and returns Ed25519-signed evidence. Coder
+success requires changed artifacts; Tester success requires a successful test
+command; Governance requires an explicit approval plus passing artifact and
+test checks. The coordinator verifies the pinned executor identity and
+role-specific evidence schema before accepting the role transition.
+
+This bridge is disabled until the matching executor public key, executor ID,
+and four independent role-specific executor tokens are configured. Create the
+shared Docker network once with `docker network create swarm-integration`.
+Provision the private key only in Grok Bot's `./secrets` directory and copy
+only the public key into this repository's `./secrets/grok-swarm-executor.pub`.
+Set `SWARM_EXECUTOR_PUBLIC_KEY_HOST_FILE=./secrets/grok-swarm-executor.pub`,
+then start the Swarm stack with both `docker-compose.yml` and
+`docker-compose.swarm.yml`. See the Grok Bot README's “Signed Swarm specialist
+execution bridge” section for the matching key and token setup.
+
+The terminal sandbox is a constrained Docker container, not a disposable VM.
+Per-job workspaces persist and require a retention/cleanup policy. This bridge
+does not yet provide distributed atomic leases across multiple coordinator
+instances, cancellation fencing for external side effects, or a production
+multi-tenant isolation guarantee. Keep the PR in draft until the exact-head
+contract suite and a live four-role job pass.
 
 Run the coordinator contract suite with:
 
@@ -76,3 +95,24 @@ ephemeral registration token at launch, destroy the VM after completion, and
 prove cleanup and secret isolation. Use a separate trusted workflow for
 operator-approved jobs only. A runner label is routing metadata, not a security
 boundary.
+
+
+## Running the integrated specialist workers
+
+Create the shared network once before starting either compose project:
+
+```bash
+docker network create swarm-integration
+```
+
+Start Grok Bot and Swarm VM Runner on that network. The worker services use
+`http://grok-bot:3000/api/swarm/execute`; all four worker containers must join
+the external `swarm-integration` network. The base compose file now declares
+that external network explicitly, and the Swarm overlay mounts the pinned
+executor public key into the coordinator.
+
+The Grok Bot private signing key must remain in Grok Bot's local
+`secrets/swarm-executor-ed25519.pem`; only the public key belongs in Swarm
+Runner's `secrets/grok-swarm-executor.pub`. Use four separate 32-byte-or-longer
+executor tokens, identical in the two `.env` files. Never commit either key or
+the local secret directory.
