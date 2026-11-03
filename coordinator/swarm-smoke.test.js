@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign, createHash } from "node:crypto";
 import { canonicalJson } from "./integration-contract.js";
-import { buildSmokeObjective, smokeArtifactPaths, validateCompletedJob } from "./swarm-smoke.js";
+import { buildSmokeObjective, smokeArtifactPaths, smokeArtifactExpectations, validateCompletedJob } from "./swarm-smoke.js";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
@@ -10,6 +10,9 @@ const nowMs = 1730000000000;
 const executor = "spiffe://prod/agent/grok-bot";
 const jobId = "job-88";
 const tenant = "control12";
+const expectedArtifacts = smokeArtifactExpectations("smoke-run");
+const expectedTestCommand = "node --test " + expectedArtifacts[1].path;
+
 const digest = value => "sha256:" + createHash("sha256").update(value).digest("hex");
 
 function makeEvent(role, report) {
@@ -38,11 +41,8 @@ function validJob() {
     id: jobId, tenant, status: "completed",
     events: [
       makeEvent("debugger", { diagnosis: "Inspected the source and found no blocker.", reproduction: "pwd && git status --short" }),
-      makeEvent("coder", { artifacts: [
-        { path: "swarm-smoke-smoke-run.txt", sha256: digest("artifact") },
-        { path: "swarm-smoke-smoke-run.test.js", sha256: digest("test artifact") }
-      ] }),
-      makeEvent("tester", { tests: [{ command: "node --test swarm-smoke-smoke-run.test.js", exit_code: 0 }] }),
+      makeEvent("coder", { artifacts: expectedArtifacts }),
+      makeEvent("tester", { tests: [{ command: expectedTestCommand, exit_code: 0 }] }),
       makeEvent("governance", { decision: "approve", checks: [
         { name: "successful terminal execution", passed: true },
         { name: "artifact inventory", passed: true },
@@ -67,8 +67,7 @@ test("smoke objective creates a bounded, non-destructive, executable four-role t
 test("smoke verifier accepts four ordered signed events and returns a compact receipt", () => {
   const summary = validateCompletedJob(validJob(), {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   });
   assert.equal(summary.status, "completed");
   assert.equal(summary.artifactCount, 1);
@@ -131,7 +130,7 @@ test("smoke verifier rejects malformed coder artifacts and governance rejection"
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
     expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
     expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
-  }), /role-specific evidence report|coder artifacts|uniquely named smoke artifacts/);
+  }), /role-specific evidence report|coder artifacts|smoke artifact paths or exact content hashes/);
   const rejected = validJob();
   rejected.events[3] = makeEvent("governance", { decision: "reject", checks: [{ name: "tests", passed: false }] });
   assert.throws(() => validateCompletedJob(rejected, {
