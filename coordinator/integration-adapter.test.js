@@ -21,7 +21,7 @@ const trust = {
   swarmReceiptPrivateKeyPem: receiptKeys.privateKey.export({ type: "pkcs8", format: "pem" }),
 };
 
-function requestFor(payload = { objective: "run debugger, coder, tester, governance" }) {
+function requestFor(payload = { objective: "run debugger, coder, tester, governance", action: { type: "Execute", resource: "swarm.jobs", method: "POST" } }) {
   const now = Date.now();
   const capability = {
     id: "cap-42", issuer: trust.capabilityAuthorityIssuer, audience,
@@ -36,7 +36,6 @@ function requestFor(payload = { objective: "run debugger, coder, tester, governa
   return {
     envelope: { ...unsigned, signature: signObject(unsigned, issuerKeys.privateKey) },
     payload, capability, capability_signature: signObject(capability, caKeys.privateKey),
-    action: { type: "Execute", resource: "swarm.jobs", method: "POST" },
   };
 }
 
@@ -63,9 +62,12 @@ test("rejects tampering, capability mismatch, method substitution and bad object
   delete alteredEnvelope.signature;
   wrongCap.envelope = { ...alteredEnvelope, signature: signObject(alteredEnvelope, issuerKeys.privateKey) };
   await assert.rejects(authorizeAndEnqueue({ request: wrongCap, trust, commit }), /capability_id does not match/);
-  const wrongMethod = requestFor(); wrongMethod.action.method = "DELETE";
+  const wrongMethod = requestFor(); wrongMethod.payload.action.method = "DELETE";
+  const changedMethodEnvelope = { ...wrongMethod.envelope, payload_digest: digestJson(wrongMethod.payload) };
+  delete changedMethodEnvelope.signature;
+  wrongMethod.envelope = { ...changedMethodEnvelope, signature: signObject(changedMethodEnvelope, issuerKeys.privateKey) };
   await assert.rejects(authorizeAndEnqueue({ request: wrongMethod, trust, commit }), /does not authorize exact/);
-  const empty = requestFor({ objective: "   " });
+  const empty = requestFor({ objective: "   ", action: { type: "Execute", resource: "swarm.jobs", method: "POST" } });
   await assert.rejects(authorizeAndEnqueue({ request: empty, trust, commit }), /objective/);
   assert.equal(commits, 0);
 });
