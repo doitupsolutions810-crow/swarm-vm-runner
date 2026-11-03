@@ -7,7 +7,7 @@ function validateTimeoutMs(value, name) {
 
 export async function executeRoleTask({
   job, role, coordinatorUrl, executorUrl, readToken, roleToken, executorToken,
-  fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000, claimToken, signal,
+  fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000, claimToken, workerId, signal,
 }) {
   executorTimeoutMs = validateTimeoutMs(executorTimeoutMs, "executorTimeoutMs");
   coordinatorTimeoutMs = validateTimeoutMs(coordinatorTimeoutMs, "coordinatorTimeoutMs");
@@ -23,8 +23,12 @@ export async function executeRoleTask({
   try {
     executionResponse = await fetchImpl(executorUrl, {
       method: "POST",
-      headers: { authorization: "Bearer " + executorToken, "content-type": "application/json" },
-      body: JSON.stringify({ jobId: job.id, role, objective: job.objective, ...(claimToken ? { claimToken } : {}) }),
+      headers: {
+        authorization: "Bearer " + executorToken,
+        "content-type": "application/json",
+        "x-swarm-coordinator-token": roleToken,
+      },
+      body: JSON.stringify({ jobId: job.id, role, objective: job.objective, ...(claimToken ? { claimToken } : {}), ...(workerId ? { workerId } : {}) }),
       signal: executorSignal,
     });
   } catch (error) {
