@@ -17,6 +17,7 @@ services:
     environment:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SWARM_TENANT: ${SWARM_TENANT:-control12}
+      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
       PRODUCTION: ${PRODUCTION:-0}
       PORT: 4100
     ports:
@@ -81,6 +82,7 @@ services:
     restart: unless-stopped
     environment:
       COORDINATOR_URL: http://coordinator:4100
+      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
       INTERNAL_RUNNER_NAME: ${INTERNAL_RUNNER_NAME:-control12-internal-1}
     depends_on:
       coordinator:
