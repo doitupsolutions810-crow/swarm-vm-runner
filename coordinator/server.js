@@ -353,6 +353,7 @@ export function createServer({
       }
       if (req.method === "POST" && url.pathname === "/api/events") {
         const payload = req.swarmPayload || await readJson(req);
+        if (payload.status !== "passed" && payload.status !== "failed") return json(res, 400, { error: "status must be passed or failed" });
         if (!executorPublicKeyPem || !executorId) return json(res, 503, { error: "pinned Grok Bot evidence verification key is not configured" });
         try {
           verifySignedEvidence({
