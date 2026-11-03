@@ -8,8 +8,8 @@ let server;
 let base;
 let state;
 
-async function start(token = TOKEN) {
-  const instance = createServer({ token, roleTokens: ROLE_TOKENS, tenant: "test-tenant" });
+async function start(token = TOKEN, roleTokens = ROLE_TOKENS) {
+  const instance = createServer({ token, roleTokens, tenant: "test-tenant" });
   await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
   return { instance, base: `http://127.0.0.1:${instance.address().port}` };
 }
@@ -83,6 +83,31 @@ test("malformed, non-object and oversized JSON bodies are rejected", async () =>
 
 test("JSON endpoints reject incorrect content type", async () => {
   assert.equal((await request("/api/jobs", { method: "POST", body: "objective=hello", contentType: "text/plain" })).status, 415);
+});
+
+test("worker event routes fail closed when a role credential is missing", async () => {
+  const isolated = await start(TOKEN, {});
+  const previous = base;
+  base = isolated.base;
+  try {
+    const job = await createJob();
+    const response = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed" }, token: ROLE_TOKENS.debugger });
+    assert.equal(response.status, 503);
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+  }
+});
+
+test("concurrent duplicate role reports have exactly one winner", async () => {
+  const job = await createJob();
+  const results = await Promise.all([
+    event("debugger", { jobId: job.id, status: "passed", note: "first" }),
+    event("debugger", { jobId: job.id, status: "passed", note: "second" }),
+  ]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  const stored = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
+  assert.equal(stored.events.filter((item) => item.role === "debugger").length, 1);
 });
 
 test("worker events require the dedicated role token, not the coordinator token", async () => {
