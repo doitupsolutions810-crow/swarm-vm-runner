@@ -203,7 +203,7 @@ test("duplicate role reports and invalid event states cannot advance the chain",
   const job = await createJob();
   assert.equal((await event("debugger", { jobId: job.id, status: "running" })).status, 400);
   await event("debugger", { jobId: job.id, status: "passed" });
-  const duplicate = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed" } });
+  const duplicate = await event("debugger", { jobId: job.id, status: "passed" });
   assert.equal(duplicate.status, 409);
   assert.equal((await event("debugger", { jobId: "missing", status: "passed" })).status, 404);
 });
@@ -228,27 +228,18 @@ test("all four ordered roles are required before a job completes", async () => {
   assert.equal((await event("governance", { jobId: job.id, status: "passed" })).status, 409);
 });
 
-test("stub worker reports failure instead of falsely passing unexecuted work", async () => {
+test("worker refuses to start without Grok Bot executor credentials and never fabricates a pass", async () => {
   const job = await createJob("prove worker executor is absent");
   const workerPath = fileURLToPath(new URL("../worker/worker.js", import.meta.url));
   const child = spawn(process.execPath, [workerPath], {
-    env: { ...process.env, ROLE: "debugger", COORDINATOR_URL: base, SWARM_READ_TOKEN: READ_TOKEN, SWARM_ROLE_TOKEN: ROLE_TOKENS.debugger },
+    env: { ...process.env, ROLE: "debugger", COORDINATOR_URL: base, SWARM_READ_TOKEN: READ_TOKEN, SWARM_ROLE_TOKEN: ROLE_TOKENS.debugger, SWARM_EXECUTOR_TOKEN: "" },
     stdio: "ignore",
   });
-  try {
-    let current;
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      current = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
-      if (current?.status === "failed") break;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    assert.equal(current?.status, "failed");
-    assert.match(current.events[0].note, /no task was executed/);
-  } finally {
-    child.kill("SIGTERM");
-    await new Promise((resolve) => child.once("exit", resolve));
-  }
+  const exitCode = await new Promise((resolve) => child.once("exit", resolve));
+  assert.notEqual(exitCode, 0);
+  const current = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
+  assert.equal(current.status, "queued");
+  assert.equal(current.events.length, 0);
 });
 
 test("job and runner state survive coordinator restart with stale claims invalidated", async () => {
