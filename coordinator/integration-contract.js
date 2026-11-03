@@ -159,7 +159,7 @@ export function verifySignedEvidence({ evidence, signature, publicKeyPem, expect
     if (!evidence.tool_results.length || !evidence.tool_results.every(result => result.ok)) throw new Error("successful evidence requires successful tool results");
     const terminal = evidence.tool_results.some(result => result.tool === "terminal" && result.ok && result.exitCode === 0);
     if (["coder", "tester"].includes(expectedRole) && !terminal) throw new Error("coder/tester evidence requires a successful terminal command");
-    if (!evidence.tool_results.some(result => result.ok && ["terminal", "web.fetch", "browser"].includes(result.tool))) throw new Error("evidence lacks an executed tool");
+    if (!evidence.tool_results.some(result => result.ok && ["terminal", "web.fetch"].includes(result.tool))) throw new Error("evidence lacks an executed tool");
     const report = evidence.report;
     const reportOk = expectedRole === "debugger"
       ? validText(report.diagnosis) && validText(report.reproduction)
