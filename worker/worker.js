@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { executeRoleTask } from "./execute.js";
+import { executeRoleTask, matchesWorkerTenant } from "./execute.js";
 
 const ROLE = process.env.ROLE || "debugger";
 const TENANT = process.env.SWARM_TENANT || "control12";
@@ -31,7 +31,7 @@ async function tick() {
     if (res.status === 204) return;
     if (!res.ok) throw new Error("claim rejected (" + res.status + ")");
     const mine = await res.json();
-    if (typeof mine.tenant !== "string" || mine.tenant !== TENANT) {
+    if (!matchesWorkerTenant(mine.tenant, TENANT)) {
       console.error(ROLE, mine.id, "claimed job tenant does not match worker configuration; releasing claim");
       try {
         const released = await fetch(COORDINATOR + "/api/worker/" + ROLE + "/release", {
