@@ -292,7 +292,7 @@ export function createServer({
         } else if (req.method === "POST" && url.pathname === "/api/integration/enqueue") {
           // The signed envelope and capability are the caller authentication boundary.
         } else {
-          const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew|validate)$/.exec(url.pathname);
+          const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew|validate|release)$/.exec(url.pathname);
           const credential = workerRoute ? roleTokens?.[workerRoute[1]]
             : req.method === "GET" && (url.pathname === "/api/jobs" || url.pathname === "/api/search")
               ? readToken
@@ -343,7 +343,32 @@ export function createServer({
         });
         return json(res, 200, { jobs: visibleJobs });
       }
-      const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew|validate)$/.exec(url.pathname);
+      const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew|validate|release)$/.exec(url.pathname);
+      if (req.method === "POST" && workerRoute && workerRoute[2] === "release") {
+        const payload = await readJson(req);
+        const role = workerRoute[1];
+        if (typeof payload.jobId !== "string" || typeof payload.tenant !== "string" || typeof payload.workerId !== "string"
+            || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.workerId)
+            || typeof payload.claimToken !== "string" || payload.claimToken.length < 32) {
+          return json(res, 400, { error: "jobId, tenant, workerId, and claimToken required" });
+        }
+        const outcome = await serializeMutation(async () => {
+          const job = jobs.get(payload.jobId);
+          if (!job) return { status: 404, body: { error: "unknown job" } };
+          if (payload.tenant !== job.tenant) return { status: 403, body: { error: "tenant mismatch" } };
+          const lease = job.lease;
+          if (!lease || lease.role !== role || lease.workerId !== payload.workerId || lease.claimToken !== payload.claimToken) {
+            return { status: 403, body: { error: "active specialist claim does not match" } };
+          }
+          if (Number(lease.expiresAt) <= now()) return { status: 409, body: { error: "specialist claim expired" } };
+          const next = structuredClone(job);
+          delete next.lease;
+          await persist({ type: "job", job: next });
+          jobs.set(next.id, next);
+          return { status: 200, body: { released: true, jobId: next.id, tenant: next.tenant, role } };
+        });
+        return json(res, outcome.status, outcome.body);
+      }
       if (req.method === "POST" && workerRoute && workerRoute[2] === "validate") {
         const payload = await readJson(req);
         const role = workerRoute[1];
