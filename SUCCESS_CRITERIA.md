@@ -10,7 +10,9 @@
 6. Duplicate, out-of-order, malformed, oversized, invalid-UTF-8, and post-terminal events are rejected.
 7. Internal runner completion is bound to the runner that claimed the job.
 
-The coordinator state journal is fsync-backed, compacted, and replayed on restart; interrupted final appends are ignored, while malformed interior records fail startup. Runner claims are leased and carry fresh claim tokens after restart.\n\n## Actual execution (not yet satisfied)
+The coordinator state journal is fsync-backed, compacted, and replayed on restart; interrupted final appends are ignored, while malformed interior records fail startup. Runner claims are leased and carry fresh claim tokens after restart.
+
+## Actual execution (not yet satisfied)
 
 The current four worker containers are protocol stubs. They intentionally report a
 failed event until a real executor is configured. A successful HTTP handshake or
