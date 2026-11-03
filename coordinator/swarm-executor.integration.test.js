@@ -74,7 +74,11 @@ async function startGrokMock(responseFactory) {
 
 test("real coordinator accepts Grok Bot signed evidence and advances the specialist chain", async (t) => {
   const coordinator = await startCoordinator();
-  const grok = await startGrokMock((body) => ({ status: 200, body: signedEvidence(body.jobId, body.role) }));
+  let expectedEvidence;
+  const grok = await startGrokMock((body) => {
+    expectedEvidence = signedEvidence(body.jobId, body.role);
+    return { status: 200, body: expectedEvidence };
+  });
   t.after(async () => {
     await new Promise((resolve) => grok.server.close(resolve));
     await new Promise((resolve) => coordinator.server.close(resolve));
@@ -96,10 +100,7 @@ test("real coordinator accepts Grok Bot signed evidence and advances the special
   assert.equal(state.jobs[0].step, 1);
   assert.equal(state.jobs[0].status, "running");
   assert.equal(state.jobs[0].events[0].role, "debugger");
-  assert.equal(state.jobs[0].events[0].evidence_signature, result.evidence && (await (async () => {
-    const replay = await fetch(coordinator.url + "/api/jobs", { headers: { authorization: "Bearer " + tokens.read } });
-    return (await replay.json()).jobs[0].events[0].evidence_signature;
-  })()));
+  assert.equal(state.jobs[0].events[0].evidence_signature, expectedEvidence.evidence_signature);
 });
 
 test("coordinator rejects tampered executor signatures and leaves job unchanged", async (t) => {
