@@ -43,12 +43,17 @@ function validJob() {
       makeEvent("debugger", { diagnosis: "Inspected the source and found no blocker.", reproduction: "pwd && git status --short" }),
       makeEvent("coder", { artifacts: expectedArtifacts }),
       makeEvent("tester", { tests: [{ command: expectedTestCommand, exit_code: 0 }] }),
-      makeEvent("governance", { decision: "approve", checks: [
-        { name: "successful terminal execution", passed: true },
-        { name: "artifact inventory", passed: true },
-        { name: "successful test command", passed: true },
-        { name: "explicit governance approval", passed: true }
-      ] })
+      makeEvent("governance", {
+        decision: "approve",
+        artifact_inventory: expectedArtifacts,
+        test_commands: [{ command: expectedTestCommand, exit_code: 0 }],
+        checks: [
+          { name: "successful terminal execution", passed: true },
+          { name: "artifact inventory", passed: true },
+          { name: "successful test command", passed: true },
+          { name: "explicit governance approval", passed: true }
+        ]
+      })
     ]
   };
 }
@@ -159,6 +164,42 @@ test("smoke verifier rejects malformed coder artifacts and governance rejection"
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
     expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /role-specific evidence report|governance/);
+});
+
+test("smoke verifier rejects governance inventory or test evidence that does not match the smoke task", () => {
+  const wrongInventory = validJob();
+  wrongInventory.events[3] = makeEvent("governance", {
+    decision: "approve",
+    artifact_inventory: [expectedArtifacts[0]],
+    test_commands: [{ command: expectedTestCommand, exit_code: 0 }],
+    checks: [
+      { name: "successful terminal execution", passed: true },
+      { name: "artifact inventory", passed: true },
+      { name: "successful test command", passed: true },
+      { name: "explicit governance approval", passed: true }
+    ]
+  });
+  assert.throws(() => validateCompletedJob(wrongInventory, {
+    expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
+  }), /governance independent artifact inventory/);
+
+  const wrongCommand = validJob();
+  wrongCommand.events[3] = makeEvent("governance", {
+    decision: "approve",
+    artifact_inventory: expectedArtifacts,
+    test_commands: [{ command: "npm test", exit_code: 0 }],
+    checks: [
+      { name: "successful terminal execution", passed: true },
+      { name: "artifact inventory", passed: true },
+      { name: "successful test command", passed: true },
+      { name: "explicit governance approval", passed: true }
+    ]
+  });
+  assert.throws(() => validateCompletedJob(wrongCommand, {
+    expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
+  }), /governance did not independently run the exact smoke test command/);
 });
 
 test("smoke verifier rejects failed event status and non-completed jobs", () => {
