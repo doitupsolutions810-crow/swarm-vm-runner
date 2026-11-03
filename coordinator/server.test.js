@@ -467,6 +467,18 @@ test("claim rejects invalid worker identities, lease bounds, and wrong role cred
   assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a" }, token: TOKEN })).status, 401);
 });
 
+test("external executor can validate only the current active specialist claim", async () => {
+  const job = await createJob("validate executor claim");
+  const claim = await request("/api/worker/debugger/claim", {
+    method: "POST", body: { workerId: "worker-a", leaseMs: 30000 }, token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(claim.status, 200);
+  const validBody = { jobId: job.id, workerId: "worker-a", claimToken: claim.body.claimToken };
+  assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: validBody, token: ROLE_TOKENS.debugger })).status, 200);
+  assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: { ...validBody, workerId: "worker-b" }, token: ROLE_TOKENS.debugger })).status, 403);
+  assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: validBody, token: ROLE_TOKENS.coder })).status, 401);
+});
+
 test("claim lease can be renewed and rejects mismatched identity or token", async () => {
   const job = await createJob("renew lease");
   const claim = await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a" }, token: ROLE_TOKENS.debugger });
