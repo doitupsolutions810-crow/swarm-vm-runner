@@ -6,6 +6,11 @@ POLL_SECONDS="${PROVE_SUCCESS_POLL_SECONDS:-20}"
 INTERVAL_SECONDS="${PROVE_SUCCESS_INTERVAL_SECONDS:-1}"
 API_TOKEN="${SWARM_API_TOKEN:-}"
 READ_TOKEN="${SWARM_READ_TOKEN:-}"
+RUNNER_TOKEN="${SWARM_RUNNER_TOKEN:-}"
+DEBUGGER_TOKEN="${SWARM_DEBUGGER_TOKEN:-}"
+CODER_TOKEN="${SWARM_CODER_TOKEN:-}"
+TESTER_TOKEN="${SWARM_TESTER_TOKEN:-}"
+GOVERNANCE_TOKEN="${SWARM_GOVERNANCE_TOKEN:-}"
 [[ "$POLL_SECONDS" =~ ^[0-9]{1,4}$ ]] || { echo "invalid PROVE_SUCCESS_POLL_SECONDS"; exit 2; }
 [[ "$INTERVAL_SECONDS" =~ ^[0-9]{1,2}$ ]] || { echo "invalid PROVE_SUCCESS_INTERVAL_SECONDS"; exit 2; }
 PASS=0; FAIL=0; DEGRADED=0
@@ -19,8 +24,8 @@ echo "=========================================="
 [[ -f "$ROOT/runner/entrypoint.sh" ]] && pass "runner entrypoint" || fail "runner entrypoint"
 grep -q FAIL_CLOSED "$ROOT/runner/entrypoint.sh" && pass "runner fail-closed" || fail "runner fail-closed"
 
-if (( ${#API_TOKEN} < 32 || ${#READ_TOKEN} < 32 )); then
-  fail "SWARM_API_TOKEN and SWARM_READ_TOKEN must each be at least 32 characters"
+if (( ${#API_TOKEN} < 32 || ${#READ_TOKEN} < 32 || ${#RUNNER_TOKEN} < 32 || ${#DEBUGGER_TOKEN} < 32 || ${#CODER_TOKEN} < 32 || ${#TESTER_TOKEN} < 32 || ${#GOVERNANCE_TOKEN} < 32 )); then
+  fail "all seven distinct SWARM_* tokens must be set to at least 32 characters"
 elif curl -fsS --max-time 3 "$BASE/health" >/dev/null; then
   pass "coordinator health"
   JOB="$(curl -fsS --max-time 5 -X POST "$BASE/api/jobs" \
