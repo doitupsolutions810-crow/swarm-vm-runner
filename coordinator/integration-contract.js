@@ -6,6 +6,17 @@ const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const B64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const RAW_ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
+function assertWellFormedUnicode(value) {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new TypeError("unpaired Unicode surrogate");
+      i += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) throw new TypeError("unpaired Unicode surrogate");
+  }
+}
+
 function isPlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
@@ -13,7 +24,8 @@ function isPlainObject(value) {
 }
 
 export function canonicalJson(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "string") { assertWellFormedUnicode(value); return JSON.stringify(value); }
+  if (value === null || typeof value === "boolean") return JSON.stringify(value);
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new TypeError("non-finite JSON number");
     return JSON.stringify(value);
@@ -22,6 +34,7 @@ export function canonicalJson(value) {
   if (!isPlainObject(value)) throw new TypeError("only plain JSON objects are canonicalizable");
   const keys = Object.keys(value).sort();
   for (const key of keys) {
+    assertWellFormedUnicode(key);
     if (["__proto__", "prototype", "constructor"].includes(key)) throw new TypeError("unsafe object key");
     if (value[key] === undefined) throw new TypeError("undefined object value");
   }
