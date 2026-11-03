@@ -179,6 +179,24 @@ test("rejects invalid or unsafe timeout values before making network calls", asy
 });
 
 
+test("executor request forwards the active claim and role-scoped coordinator credential", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return calls.length === 1 ? { status: 200, json: async () => good } : { ok: true, status: 200 };
+  };
+  const out = await executeRoleTask({
+    job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
+    ...tokens, workerId: "tester-worker-7", claimToken: "c".repeat(40), fetchImpl,
+  });
+  assert.equal(out.reported, true);
+  assert.equal(calls[0].options.headers["x-swarm-coordinator-token"], "role-token-".padEnd(40, "r"));
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    jobId: job.id, role: "tester", objective: job.objective,
+    claimToken: "c".repeat(40), workerId: "tester-worker-7",
+  });
+});
+
 test("lease cancellation aborts the executor request and keeps the result pending", async () => {
   const controller = new AbortController();
   let observedSignal;
