@@ -29,7 +29,7 @@ async function request(path, { method = "GET", body, token, contentType = "appli
   }
   if (credential !== null) headers.authorization = `Bearer ${credential}`;
   if (body !== undefined && contentType) headers["content-type"] = contentType;
-  const response = await fetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
+  const response = await fetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : body instanceof Uint8Array ? body : typeof body === "string" ? body : JSON.stringify(body) });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
@@ -109,6 +109,11 @@ test("malformed, non-object and oversized JSON bodies are rejected", async () =>
   assert.equal((await request("/api/jobs", { method: "POST", body: "{" })).status, 400);
   assert.equal((await request("/api/jobs", { method: "POST", body: "[]" })).status, 400);
   assert.equal((await request("/api/jobs", { method: "POST", body: "x".repeat(17000) })).status, 413);
+});
+
+test("invalid UTF-8 request bytes are rejected", async () => {
+  const response = await request("/api/jobs", { method: "POST", body: new Uint8Array([0xff, 0xfe, 0x80]) });
+  assert.equal(response.status, 400);
 });
 
 test("JSON endpoints reject incorrect content type", async () => {
