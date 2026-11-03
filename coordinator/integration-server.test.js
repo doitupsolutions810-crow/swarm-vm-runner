@@ -58,7 +58,7 @@ async function stop(server) {
 }
 async function post(base, body) {
   const response = await fetch(`${base}/api/integration/enqueue`, {
-    method: "POST", headers: { authorization: `Bearer ${API_TOKEN}`, "content-type": "application/json" },
+    method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   return { status: response.status, body: await response.json() };
