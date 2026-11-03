@@ -42,7 +42,7 @@ jobs:
           node-version: "22"
       - name: Syntax check
         working-directory: coordinator
-        run: node --check server.js && node --check server.test.js && node --check integration-contract.js && node --check integration-adapter.js && node --check integration-server.test.js
+        run: node --check server.js && node --check server.test.js && node --check integration-contract.js && node --check integration-adapter.js && node --check integration-server.test.js && node --check swarm-executor.integration.test.js
       - name: Worker syntax and bridge tests
         run: node --check worker/worker.js && node --check worker/execute.js && node --test worker/execute.test.js
       - name: Shell syntax check
