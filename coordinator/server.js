@@ -78,6 +78,12 @@ function validObjective(value) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_OBJECTIVE;
 }
 
+function loadSecret(value, filePath) {
+  if (typeof value === "string" && value.length) return value;
+  if (typeof filePath === "string" && filePath.length) return fs.readFileSync(filePath, "utf8");
+  return "";
+}
+
 function validCredentialSet(token, readToken, runnerToken, roleTokens) {
   const values = [token, readToken, runnerToken, ...ROLES.map((role) => roleTokens?.[role])];
   return values.every((value) => typeof value === "string" && value.length >= 32)
@@ -97,9 +103,9 @@ export function createServer({
   tenant = TENANT,
   stateDir = process.env.SWARM_STATE_DIR || "/var/swarm",
   compactAfterRecords = Number(process.env.SWARM_COMPACT_AFTER_RECORDS || 500),
-  avroneIssuerPublicKeyPem = process.env.SWARM_AVRONE_ISSUER_PUBLIC_KEY_PEM || "",
+  avroneIssuerPublicKeyPem = loadSecret(process.env.SWARM_AVRONE_ISSUER_PUBLIC_KEY_PEM, process.env.SWARM_AVRONE_ISSUER_PUBLIC_KEY_FILE),
   capabilityAuthorityPublicKeyB64 = process.env.SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64 || "",
-  swarmReceiptPrivateKeyPem = process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_PEM || "",
+  swarmReceiptPrivateKeyPem = loadSecret(process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_PEM, process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE),
   avroneIssuer = process.env.SWARM_AVRONE_ISSUER || "",
   swarmAudience = process.env.SWARM_SERVICE_IDENTITY || "",
   capabilityAuthorityIssuer = process.env.SWARM_CAPABILITY_AUTHORITY_ISSUER || "spiffe://prod/broker",
@@ -414,7 +420,7 @@ export function createServer({
       }
       return json(res, 404, { error: "not found" });
     } catch (error) {
-      return json(res, Number.isInteger(error.status) ? error.status : 400, { error: error.status ? error.message : "invalid request" });
+      return json(res, Number.isInteger(error.status) ? error.status : 500, { error: error.status ? error.message : "internal server error" });
     }
   });
   server.stateDir = stateDir;
