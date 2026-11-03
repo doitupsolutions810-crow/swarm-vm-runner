@@ -10,6 +10,7 @@ export async function executeRoleTask({ job, role, coordinatorUrl, executorUrl, 
       method: "POST",
       headers: { authorization: "Bearer " + executorToken, "content-type": "application/json" },
       body: JSON.stringify({ jobId: job.id, role, objective: job.objective }),
+      signal: AbortSignal.timeout(35_000),
     });
   } catch (error) {
     return { reported: false, pending: true, reason: "executor transport unavailable: " + error.message };
@@ -32,6 +33,7 @@ export async function executeRoleTask({ job, role, coordinatorUrl, executorUrl, 
       method: "POST",
       headers: { authorization: "Bearer " + roleToken, "content-type": "application/json" },
       body: JSON.stringify({ jobId: job.id, role, status: expected, note, evidence: result.evidence, evidence_signature: result.evidence_signature }),
+      signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
     return { reported: false, pending: true, reason: "coordinator report outcome unknown: " + error.message };
