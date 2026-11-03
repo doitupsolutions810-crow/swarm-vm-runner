@@ -30,6 +30,7 @@ services:
       - "${COORDINATOR_BIND_HOST:-127.0.0.1}:${COORDINATOR_PORT:-4100}:4100"
     volumes:
       - swarm-data:/var/swarm
+      - ./secrets:/run/secrets:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1))"]
       interval: 10s
@@ -46,6 +47,7 @@ services:
       SWARM_ROLE_TOKEN: ${SWARM_DEBUGGER_TOKEN}
       SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
       SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_DEBUGGER_TOKEN}
+    networks: [default, swarm-integration]
     depends_on:
       coordinator:
         condition: service_healthy
@@ -149,3 +151,8 @@ services:
 
 volumes:
   swarm-data:
+
+networks:
+  swarm-integration:
+    external: true
+    name: ${SWARM_INTEGRATION_NETWORK:-swarm-integration}
