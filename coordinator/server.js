@@ -454,7 +454,10 @@ export function createServer({
           if (payload.status !== "passed" && payload.status !== "failed") return { status: 400, body: { error: "status must be passed or failed" } };
           if (job.events.some((event) => event.role === payload.role)) return { status: 409, body: { error: "role already reported" } };
           const lease = job.lease;
-          if (!lease || lease.role !== payload.role || typeof payload.claimToken !== "string" || lease.claimToken !== payload.claimToken) return { status: 403, body: { error: "active specialist claim required" } };
+          if (!lease || lease.role !== payload.role || lease.workerId !== payload.workerId
+              || typeof payload.claimToken !== "string" || lease.claimToken !== payload.claimToken) {
+            return { status: 403, body: { error: "active specialist claim required" } };
+          }
           if (Number(lease.expiresAt) <= now()) return { status: 409, body: { error: "specialist claim expired" } };
           const next = structuredClone(job);
           delete next.lease;
