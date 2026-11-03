@@ -79,8 +79,7 @@ test("smoke verifier rejects a job from another tenant or job ID", () => {
   const job = validJob();
   assert.throws(() => validateCompletedJob({ ...job, tenant: "other-tenant" }, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /identity, tenant/);
   assert.throws(() => validateCompletedJob(job, {
     expectedJobId: "job-other", expectedTenant: tenant, expectedExecutor: executor, publicKeyPem, nowMs
@@ -91,15 +90,13 @@ test("smoke verifier rejects missing, reordered, or duplicate specialist events"
   const job = validJob();
   assert.throws(() => validateCompletedJob({ ...job, events: job.events.slice(0, 3) }, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /exactly four/);
   const reordered = validJob();
   [reordered.events[0], reordered.events[1]] = [reordered.events[1], reordered.events[0]];
   assert.throws(() => validateCompletedJob(reordered, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /role order/);
 });
 
@@ -108,8 +105,7 @@ test("smoke verifier rejects invalid executor signatures", () => {
   job.events[1].evidence_signature = Buffer.from("not-a-signature").toString("base64");
   assert.throws(() => validateCompletedJob(job, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /invalid executor evidence signature/);
 });
 
@@ -118,8 +114,7 @@ test("smoke verifier rejects failed or fabricated tester evidence", () => {
   job.events[2] = makeEvent("tester", { tests: [{ command: "npm test", exit_code: 1 }] });
   assert.throws(() => validateCompletedJob(job, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /role-specific evidence report/);
 });
 
@@ -128,15 +123,13 @@ test("smoke verifier rejects malformed coder artifacts and governance rejection"
   malformed.events[1] = makeEvent("coder", { artifacts: [{ path: "../escape", sha256: "bad" }] });
   assert.throws(() => validateCompletedJob(malformed, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /role-specific evidence report|coder artifacts|smoke artifact paths or exact content hashes/);
   const rejected = validJob();
   rejected.events[3] = makeEvent("governance", { decision: "reject", checks: [{ name: "tests", passed: false }] });
   assert.throws(() => validateCompletedJob(rejected, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /role-specific evidence report|governance/);
 });
 
@@ -145,14 +138,12 @@ test("smoke verifier rejects failed event status and non-completed jobs", () => 
   failed.events[0].status = "failed";
   assert.throws(() => validateCompletedJob(failed, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /specialist event failed/);
   const running = validJob();
   running.status = "running";
   assert.throws(() => validateCompletedJob(running, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
-    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
-    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   }), /identity, tenant, or completion/);
 });
