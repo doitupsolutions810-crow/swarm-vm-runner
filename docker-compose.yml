@@ -46,7 +46,6 @@ services:
       SWARM_ROLE_TOKEN: ${SWARM_DEBUGGER_TOKEN}
       SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
       SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_DEBUGGER_TOKEN}
-    networks: [default, swarm-integration]
     depends_on:
       coordinator:
         condition: service_healthy
@@ -147,11 +146,6 @@ services:
     depends_on:
       coordinator:
         condition: service_healthy
-
-networks:
-  swarm-integration:
-    external: true
-    name: ${SWARM_INTEGRATION_NETWORK:-swarm-integration}
 
 volumes:
   swarm-data:
