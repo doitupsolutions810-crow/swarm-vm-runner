@@ -534,6 +534,8 @@ export function createServer({
       if (req.method === "POST" && url.pathname === "/api/runner/claim") {
         const payload = await readJson(req);
         if (typeof payload.runner !== "string" || !/^[A-Za-z0-9_.-]{1,80}$/.test(payload.runner)) return json(res, 400, { error: "valid runner name required" });
+        const leaseMs = payload.leaseMs === undefined ? 30000 : payload.leaseMs;
+        if (!Number.isSafeInteger(leaseMs) || leaseMs < 5000 || leaseMs > 120000) return json(res, 400, { error: "leaseMs must be an integer in 5000..120000" });
         const outcome = await serializeMutation(async () => {
           const timestamp = now();
           for (const candidate of runnerJobs.values()) {
@@ -553,13 +555,39 @@ export function createServer({
           if (!id) return null;
           const job = runnerJobs.get(id);
           if (!job || job.status !== "queued") return { status: 409, body: { error: "queue state inconsistent" } };
-          const claimed = { ...job, status: "running", runner: payload.runner, claimToken: randomUUID(), claimedAt: new Date().toISOString(), leaseExpiresAt: timestamp + 30000 };
+          const claimed = { ...job, status: "running", runner: payload.runner, claimToken: randomUUID(), claimedAt: new Date(timestamp).toISOString(), leaseExpiresAt: timestamp + leaseMs };
           try { await persist({ type: "runner-job", job: claimed }); }
           catch (error) { runnerQueue.unshift(id); throw error; }
           runnerJobs.set(id, claimed);
           return { status: 200, body: claimed };
         });
         if (!outcome) { res.writeHead(204); return res.end(); }
+        return json(res, outcome.status, outcome.body);
+      }
+      if (req.method === "POST" && url.pathname === "/api/runner/renew") {
+        const payload = await readJson(req);
+        if (typeof payload.id !== "string" || !/^run-[A-Za-z0-9_.:-]{1,128}$/.test(payload.id)
+            || typeof payload.runner !== "string" || !/^[A-Za-z0-9_.-]{1,80}$/.test(payload.runner)
+            || typeof payload.claimToken !== "string" || payload.claimToken.length < 32 || payload.claimToken.length > 512) {
+          return json(res, 400, { error: "valid id, runner, and claimToken required" });
+        }
+        const leaseMs = payload.leaseMs === undefined ? 30000 : payload.leaseMs;
+        if (!Number.isSafeInteger(leaseMs) || leaseMs < 5000 || leaseMs > 120000) {
+          return json(res, 400, { error: "leaseMs must be an integer in 5000..120000" });
+        }
+        const outcome = await serializeMutation(async () => {
+          const job = runnerJobs.get(payload.id);
+          if (!job) return { status: 404, body: { error: "unknown runner job" } };
+          if (job.status !== "running") return { status: 409, body: { error: "runner job is not active" } };
+          if (payload.runner !== job.runner || payload.claimToken !== job.claimToken) return { status: 403, body: { error: "runner claim does not match" } };
+          const timestamp = now();
+          const leaseExpiry = Number(job.leaseExpiresAt);
+          if (!Number.isFinite(leaseExpiry) || leaseExpiry <= timestamp) return { status: 409, body: { error: "runner claim expired" } };
+          const renewed = { ...job, leaseExpiresAt: timestamp + leaseMs, renewedAt: new Date(timestamp).toISOString() };
+          await persist({ type: "runner-job", job: renewed });
+          runnerJobs.set(renewed.id, renewed);
+          return { status: 200, body: { id: renewed.id, runner: renewed.runner, leaseExpiresAt: renewed.leaseExpiresAt } };
+        });
         return json(res, outcome.status, outcome.body);
       }
       if (req.method === "POST" && url.pathname === "/api/runner/complete") {
