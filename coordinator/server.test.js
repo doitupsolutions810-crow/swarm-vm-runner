@@ -265,7 +265,15 @@ test("journal recovery ignores only an incomplete final append", async () => {
     base = second.base;
     const restored = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
     assert.equal(restored.objective, "journal tail recovery");
-    await stop(second.instance);
+    const nextJob = await createJob("append after repaired tail");
+    assert.equal(nextJob.id, "job-2");
+    await stop(second.instance, { removeState: false });
+    const third = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+    base = third.base;
+    const afterSecondRestart = (await request("/api/jobs")).body.jobs;
+    assert.equal(afterSecondRestart.length, 2);
+    assert.ok(afterSecondRestart.some((item) => item.id === nextJob.id));
+    await stop(third.instance);
   } finally {
     base = previous;
     fs.rmSync(stateDir, { recursive: true, force: true });
