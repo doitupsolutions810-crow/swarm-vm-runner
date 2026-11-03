@@ -133,6 +133,11 @@ async function requestJson(fetchImpl, url, token, options = {}) {
   return body;
 }
 
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+
 export async function runSwarmSmoke({ env = process.env, fetchImpl = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const baseUrl = String(env.COORDINATOR_URL || "http://127.0.0.1:4100").replace(/\/+$/, "");
   const coordinatorToken = env.SWARM_TOKEN || "";
@@ -145,8 +150,8 @@ export async function runSwarmSmoke({ env = process.env, fetchImpl = fetch, slee
   if ([coordinatorToken, readToken, tenant, executorId, publicKeyPath, repository].some(value => !value)) {
     throw new Error("configure SWARM_TOKEN, SWARM_READ_TOKEN, SWARM_TENANT, SWARM_EXECUTOR_ID, SWARM_EXECUTOR_PUBLIC_KEY_FILE, and SWARM_SMOKE_REPOSITORY");
   }
-  const timeoutMs = Math.max(60000, Math.min(3600000, Number(env.SWARM_SMOKE_TIMEOUT_MS || 900000)));
-  const pollMs = Math.max(500, Math.min(15000, Number(env.SWARM_SMOKE_POLL_MS || 2000)));
+  const timeoutMs = boundedInteger(env.SWARM_SMOKE_TIMEOUT_MS, 900000, 60000, 3600000);
+  const pollMs = boundedInteger(env.SWARM_SMOKE_POLL_MS, 2000, 500, 15000);
   const publicKeyPem = readFileSync(publicKeyPath, "utf8");
   const runTag = "smoke-" + randomUUID();
   const objective = buildSmokeObjective(runTag, repository, branch);
