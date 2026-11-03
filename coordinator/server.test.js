@@ -3,22 +3,31 @@ import assert from "node:assert/strict";
 import { createServer } from "./server.js";
 
 const TOKEN = "test-token-0123456789abcdef0123456789abcdef";
+const READ_TOKEN = "read-token-0123456789abcdef0123456789abcdef";
+const RUNNER_TOKEN = "runner-token-0123456789abcdef0123456789abcdef";
 const ROLE_TOKENS = Object.fromEntries(["debugger", "coder", "tester", "governance"].map((role) => [role, `role-${role}-token-0123456789abcdef`]));
 let server;
 let base;
 let state;
 
 async function start(token = TOKEN, roleTokens = ROLE_TOKENS) {
-  const instance = createServer({ token, roleTokens, tenant: "test-tenant" });
+  const instance = createServer({ token, readToken: READ_TOKEN, runnerToken: RUNNER_TOKEN, roleTokens, tenant: "test-tenant" });
   await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
   return { instance, base: `http://127.0.0.1:${instance.address().port}` };
 }
 async function stop(instance) {
   if (instance?.listening) await new Promise((resolve, reject) => instance.close((error) => error ? reject(error) : resolve()));
 }
-async function request(path, { method = "GET", body, token = TOKEN, contentType = "application/json" } = {}) {
+async function request(path, { method = "GET", body, token, contentType = "application/json" } = {}) {
   const headers = {};
-  if (token !== null) headers.authorization = `Bearer ${token}`;
+  let credential = token;
+  if (credential === undefined) {
+    if (path.startsWith("/api/events")) credential = ROLE_TOKENS[body?.role];
+    else if (path.startsWith("/api/runner/")) credential = RUNNER_TOKEN;
+    else if (method === "GET" && (path === "/api/jobs" || path.startsWith("/api/search"))) credential = READ_TOKEN;
+    else credential = TOKEN;
+  }
+  if (credential !== null) headers.authorization = `Bearer ${credential}`;
   if (body !== undefined && contentType) headers["content-type"] = contentType;
   const response = await fetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
   const text = await response.text();
@@ -55,12 +64,20 @@ test("protected API fails closed when coordinator token is not configured", asyn
   const previous = base;
   base = isolated.base;
   try {
-    const response = await request("/api/jobs", { token: TOKEN });
+    const response = await request("/api/jobs", { method: "POST", body: { objective: "probe" }, token: TOKEN });
     assert.equal(response.status, 503);
   } finally {
     base = previous;
     await stop(isolated.instance);
   }
+});
+
+test("read, coordinator, runner and role credentials are isolated by capability", async () => {
+  assert.equal((await request("/api/jobs", { token: TOKEN })).status, 401);
+  assert.equal((await request("/api/jobs", { method: "POST", body: { objective: "no" }, token: READ_TOKEN })).status, 401);
+  assert.equal((await request("/api/jobs", { method: "POST", body: { objective: "no" }, token: RUNNER_TOKEN })).status, 401);
+  assert.equal((await request("/api/runner/jobs", { method: "POST", body: { kind: "health-probe" }, token: TOKEN })).status, 401);
+  assert.equal((await request("/api/jobs", { method: "POST", body: { objective: "no" }, token: ROLE_TOKENS.debugger })).status, 401);
 });
 
 test("missing and incorrect bearer credentials are rejected", async () => {
