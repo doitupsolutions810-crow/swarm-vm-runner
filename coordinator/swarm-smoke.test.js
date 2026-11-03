@@ -78,7 +78,7 @@ test("smoke verifier accepts four ordered signed events and returns a compact re
     expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
   });
   assert.equal(summary.status, "completed");
-  assert.equal(summary.artifactCount, 1);
+  assert.equal(summary.artifactCount, 2);
   assert.deepEqual(summary.roles.map(item => item.role), ["debugger", "coder", "tester", "governance"]);
   assert.equal(summary.governance, "approve");
 });
