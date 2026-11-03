@@ -37,6 +37,7 @@ async function request(path, { method = "GET", body, token, contentType = "appli
   let credential = token;
   if (credential === undefined) {
     if (path.startsWith("/api/events")) credential = ROLE_TOKENS[body?.role];
+    else if (/^\/api\/worker\/(debugger|coder|tester|governance)\//.test(path)) credential = ROLE_TOKENS[path.split("/")[3]];
     else if (path.startsWith("/api/runner/")) credential = RUNNER_TOKEN;
     else if (method === "GET" && (path === "/api/jobs" || path.startsWith("/api/search"))) credential = READ_TOKEN;
     else credential = TOKEN;
@@ -69,8 +70,14 @@ function signedRoleEvidence(role, payload) {
   return { evidence, evidence_signature };
 }
 async function event(role, payload) {
+  const claim = await request("/api/worker/" + role + "/claim", {
+    method: "POST", body: { workerId: "test-" + role, leaseMs: 30000 }, token: ROLE_TOKENS[role],
+  });
   const signed = signedRoleEvidence(role, payload);
-  return request("/api/events", { method: "POST", body: { ...payload, ...signed, role }, token: ROLE_TOKENS[role] });
+  return request("/api/events", {
+    method: "POST", body: { ...payload, ...signed, role, ...(claim.status === 200 ? { claimToken: claim.body.claimToken } : {}) },
+    token: ROLE_TOKENS[role],
+  });
 }
 async function createJob(objective = "verify orchestration") {
   const response = await request("/api/jobs", { method: "POST", body: { objective } });
@@ -435,5 +442,81 @@ test("internal prove-success runner fails closed without a verifiable proof adap
   } finally {
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));
+  }
+});
+
+
+test("specialist claim is atomic under concurrent same-role workers", async () => {
+  const job = await createJob("concurrent specialist claim");
+  const claims = await Promise.all([
+    request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a" }, token: ROLE_TOKENS.debugger }),
+    request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-b" }, token: ROLE_TOKENS.debugger }),
+  ]);
+  assert.deepEqual(claims.map((item) => item.status).sort(), [200, 204]);
+  const winner = claims.find((item) => item.status === 200).body;
+  assert.equal(winner.id, job.id);
+  const visible = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
+  assert.equal(visible.lease.claimToken, undefined);
+});
+
+test("claim rejects invalid worker identities, lease bounds, and wrong role credentials", async () => {
+  assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "../escape" }, token: ROLE_TOKENS.debugger })).status, 400);
+  for (const leaseMs of [0, -1, 999, 600001, 1.5, "1000", null]) {
+    assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a", leaseMs }, token: ROLE_TOKENS.debugger })).status, 400);
+  }
+  assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a" }, token: TOKEN })).status, 401);
+});
+
+test("claim lease can be renewed and rejects mismatched identity or token", async () => {
+  const job = await createJob("renew lease");
+  const claim = await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a" }, token: ROLE_TOKENS.debugger });
+  assert.equal(claim.status, 200);
+  assert.equal((await request("/api/worker/debugger/renew", { method: "POST", body: { jobId: job.id, workerId: "worker-b", claimToken: claim.body.claimToken }, token: ROLE_TOKENS.debugger })).status, 403);
+  assert.equal((await request("/api/worker/debugger/renew", { method: "POST", body: { jobId: job.id, workerId: "worker-a", claimToken: "x".repeat(36) }, token: ROLE_TOKENS.debugger })).status, 403);
+  assert.equal((await request("/api/worker/debugger/renew", { method: "POST", body: { jobId: job.id, workerId: "worker-a", claimToken: claim.body.claimToken, leaseMs: 45000 }, token: ROLE_TOKENS.debugger })).status, 200);
+});
+
+test("expired lease is reclaimed with a new token and stale completion is rejected", async () => {
+  let clock = 100000;
+  const isolated = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, fs.mkdtempSync(path.join(os.tmpdir(), "swarm-lease-expiry-")), 500, { now: () => clock });
+  const previous = base;
+  base = isolated.base;
+  try {
+    const job = await createJob("expire and reclaim");
+    const first = await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a", leaseMs: 1000 }, token: ROLE_TOKENS.debugger });
+    assert.equal(first.status, 200);
+    clock += 1001;
+    const second = await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-b", leaseMs: 1000 }, token: ROLE_TOKENS.debugger });
+    assert.equal(second.status, 200);
+    assert.notEqual(second.body.claimToken, first.body.claimToken);
+    const signed = signedRoleEvidence("debugger", { jobId: job.id, status: "passed" });
+    const stale = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: first.body.claimToken }, token: ROLE_TOKENS.debugger });
+    assert.equal(stale.status, 403);
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+  }
+});
+
+test("active specialist lease survives restart and remains protected until expiry", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-lease-restart-"));
+  const previous = base;
+  const first = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+  base = first.base;
+  try {
+    const job = await createJob("persist active lease");
+    const claim = await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a", leaseMs: 60000 }, token: ROLE_TOKENS.debugger });
+    assert.equal(claim.status, 200);
+    await stop(first.instance, { removeState: false });
+    const second = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+    base = second.base;
+    assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-b" }, token: ROLE_TOKENS.debugger })).status, 204);
+    const signed = signedRoleEvidence("debugger", { jobId: job.id, status: "passed" });
+    const accepted = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: claim.body.claimToken }, token: ROLE_TOKENS.debugger });
+    assert.equal(accepted.status, 200);
+    await stop(second.instance);
+  } finally {
+    base = previous;
+    fs.rmSync(stateDir, { recursive: true, force: true });
   }
 });
