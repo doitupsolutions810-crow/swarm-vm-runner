@@ -358,3 +358,42 @@ test("search is authenticated and query length is bounded", async () => {
   assert.equal((await request(`/api/search?q=${"x".repeat(81)}`)).status, 400);
   assert.equal((await request("/api/search?q=job")).status, 200);
 });
+
+
+test("internal prove-success runner fails closed without a verifiable proof adapter", async () => {
+  const queued = await request("/api/runner/jobs", {
+    method: "POST",
+    body: { kind: "prove-success", objective: "prove this exact job" },
+  });
+  assert.equal(queued.status, 202);
+  const runnerPath = fileURLToPath(new URL("../internal-runner/runner.mjs", import.meta.url));
+  const child = spawn(process.execPath, [runnerPath], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    env: {
+      ...process.env,
+      COORDINATOR_URL: base,
+      INTERNAL_RUNNER_NAME: "test-proof-runner",
+      SWARM_ROOT: fileURLToPath(new URL("..", import.meta.url)),
+      SWARM_API_TOKEN: TOKEN,
+      SWARM_READ_TOKEN: READ_TOKEN,
+      SWARM_RUNNER_TOKEN: RUNNER_TOKEN,
+      POLL_MS: "100",
+    },
+    stdio: "ignore",
+  });
+  try {
+    let completed;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const jobs = (await request("/api/runner/jobs")).body.jobs;
+      completed = jobs.find((job) => job.id === queued.body.id);
+      if (completed?.status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(completed?.status, "failed");
+    assert.match(completed.note, /no verifiable proof adapter/);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+  }
+});
