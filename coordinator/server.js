@@ -120,6 +120,7 @@ export function createServer({
   const runnerQueue = [];
   const integrationMessages = new Map();
   const integrationCorrelations = new Map();
+  const jobIdempotency = new Map();
   const receiptPublicKeyPem = swarmReceiptPrivateKeyPem
     ? createPublicKey(swarmReceiptPrivateKeyPem).export({ type: "spki", format: "pem" })
     : "";
@@ -175,6 +176,9 @@ export function createServer({
       const record = JSON.parse(line);
       if (record.type === "job" && record.job && typeof record.job.id === "string") {
         jobs.set(record.job.id, record.job);
+        if (typeof record.job.idempotencyKey === "string" && typeof record.job.idempotencyDigest === "string") {
+          jobIdempotency.set(record.job.idempotencyKey, { jobId: record.job.id, digest: record.job.idempotencyDigest });
+        }
         const n = Number(record.job.id.replace(/^job-/, ""));
         if (Number.isSafeInteger(n)) seq = Math.max(seq, n + 1);
       } else if (record.type === "runner-job" && record.job && typeof record.job.id === "string") {
@@ -264,12 +268,34 @@ export function createServer({
     return operation;
   }
 
-  async function createSwarmJob(objective) {
+  async function createSwarmJob(objective, idempotencyKey = null) {
+    const normalizedObjective = objective.trim();
+    const idempotencyDigest = idempotencyKey
+      ? digestJson({ tenant, objective: normalizedObjective })
+      : null;
+    if (idempotencyKey) {
+      const prior = jobIdempotency.get(idempotencyKey);
+      if (prior) {
+        if (prior.digest !== idempotencyDigest) {
+          const conflict = new Error("idempotency key was already used for a different objective");
+          conflict.status = 409;
+          throw conflict;
+        }
+        const existing = jobs.get(prior.jobId);
+        if (!existing) throw new Error("idempotency index references a missing job");
+        return { job: existing, idempotentReplay: true };
+      }
+    }
     const id = `job-${seq++}`;
-    const job = { id, tenant, objective: objective.trim(), status: "queued", chain: [...ROLES], step: 0, createdAt: new Date().toISOString(), events: [] };
+    const job = {
+      id, tenant, objective: normalizedObjective, status: "queued",
+      chain: [...ROLES], step: 0, createdAt: new Date(now()).toISOString(), events: [],
+      ...(idempotencyKey ? { idempotencyKey, idempotencyDigest } : {}),
+    };
     await persist({ type: "job", job });
     jobs.set(id, job);
-    return job;
+    if (idempotencyKey) jobIdempotency.set(idempotencyKey, { jobId: id, digest: idempotencyDigest });
+    return { job, idempotentReplay: false };
   }
 
   const server = http.createServer(async (req, res) => {
@@ -438,12 +464,21 @@ export function createServer({
       if (req.method === "POST" && url.pathname === "/api/jobs") {
         const payload = await readJson(req);
         if (!validObjective(payload.objective)) return json(res, 400, { error: "objective required (1..2000 characters)" });
-        return json(res, 202, await createSwarmJob(payload.objective));
+        const idempotencyKey = req.headers["idempotency-key"] || null;
+        if (idempotencyKey !== null && (typeof idempotencyKey !== "string"
+            || idempotencyKey.length < 1 || idempotencyKey.length > 128
+            || !/^[A-Za-z0-9_.:-]+$/.test(idempotencyKey))) {
+          return json(res, 400, { error: "idempotency-key must be 1..128 safe characters" });
+        }
+        const result = await serializeMutation(() => createSwarmJob(payload.objective, idempotencyKey));
+        return json(res, result.idempotentReplay ? 200 : 202, result.idempotentReplay
+          ? { ...result.job, idempotent_replay: true }
+          : result.job);
       }
       if (req.method === "POST" && url.pathname === "/api/multi-agent-debug") {
         const payload = await readJson(req);
         if (!validObjective(payload.objective)) return json(res, 400, { error: "objective required (1..2000 characters)" });
-        const job = await createSwarmJob(payload.objective);
+        const { job } = await serializeMutation(() => createSwarmJob(payload.objective));
         const deadline = Date.now() + 20000;
         while (Date.now() < deadline && job.status !== "completed" && job.status !== "failed") {
           await new Promise((resolve) => setTimeout(resolve, 100));
