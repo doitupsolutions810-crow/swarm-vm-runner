@@ -1,7 +1,7 @@
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { executeRoleTask } from "./execute.js";
+import { executeRoleTask, matchesWorkerTenant } from "./execute.js";
 const tokens = { readToken: "r".repeat(40), roleToken: "o".repeat(40), executorToken: "e".repeat(40) };
 const job = { id: "job-1", tenant: "test-tenant", objective: "run tests" };
 const good = { evidence: { job_id: "job-1", role: "tester", status: "succeeded", report: { tests: [{ command: "npm test", exit_code: 0 }] } }, evidence_signature: "signature" };
@@ -181,6 +181,14 @@ test("rejects invalid or unsafe timeout values before making network calls", asy
   assert.equal(calls, 0);
 });
 
+
+test("worker tenant guard rejects missing, malformed, and cross-tenant claims", () => {
+  assert.equal(matchesWorkerTenant("tenant-a", "tenant-a"), true);
+  assert.equal(matchesWorkerTenant("tenant-b", "tenant-a"), false);
+  assert.equal(matchesWorkerTenant("", "tenant-a"), false);
+  assert.equal(matchesWorkerTenant(undefined, "tenant-a"), false);
+  assert.equal(matchesWorkerTenant("tenant-a", ""), false);
+});
 
 test("executor capacity response is retryable without reporting evidence", async () => {
   const out = await executeRoleTask({
