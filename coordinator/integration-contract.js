@@ -140,3 +140,39 @@ export function verifySignedReceipt({ receipt, publicKeyPem }) {
   if (!verifyWithPem(unsigned, receipt.signature, publicKeyPem)) throw new Error("invalid receipt signature");
   return true;
 }
+
+
+export function verifySignedEvidence({ evidence, signature, publicKeyPem, expectedJobId, expectedRole, expectedExecutor, nowMs = Date.now() }) {
+  const fields = ["schema", "job_id", "role", "executor", "run_id", "status", "started_at", "completed_at", "answer_digest", "tool_results", "report"];
+  if (!exactKeys(evidence, fields)) throw new Error("evidence schema mismatch");
+  if (evidence.schema !== "grokbot.swarm-evidence/v1" || evidence.job_id !== expectedJobId || evidence.role !== expectedRole || evidence.executor !== expectedExecutor) throw new Error("evidence identity mismatch");
+  if (!["succeeded", "failed"].includes(evidence.status)) throw new Error("evidence status invalid");
+  const started = Date.parse(evidence.started_at), completed = Date.parse(evidence.completed_at);
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || new Date(started).toISOString() !== evidence.started_at || new Date(completed).toISOString() !== evidence.completed_at || completed < started || completed > nowMs + 30000) throw new Error("evidence timestamps invalid");
+  if (!DIGEST.test(evidence.answer_digest) || !Array.isArray(evidence.tool_results) || evidence.tool_results.length > 64 || !isPlainObject(evidence.report)) throw new Error("evidence digest, tools, or report invalid");
+  for (const result of evidence.tool_results) {
+    if (!exactKeys(result, ["tool", "ok", "exitCode", "stdout_sha256", "stderr_sha256"]) || !validText(result.tool) || typeof result.ok !== "boolean") throw new Error("evidence tool result malformed");
+    for (const key of ["stdout_sha256", "stderr_sha256"]) if (result[key] !== null && !DIGEST.test(result[key])) throw new Error("evidence output digest malformed");
+    if (result.exitCode !== null && !Number.isInteger(result.exitCode)) throw new Error("evidence exit code malformed");
+  }
+  if (evidence.status === "succeeded") {
+    if (!evidence.tool_results.length || !evidence.tool_results.every(result => result.ok)) throw new Error("successful evidence requires successful tool results");
+    const terminal = evidence.tool_results.some(result => result.tool === "terminal" && result.ok && result.exitCode === 0);
+    if (["coder", "tester"].includes(expectedRole) && !terminal) throw new Error("coder/tester evidence requires a successful terminal command");
+    if (!evidence.tool_results.some(result => result.ok && ["terminal", "web.fetch", "browser"].includes(result.tool))) throw new Error("evidence lacks an executed tool");
+    const report = evidence.report;
+    const reportOk = expectedRole === "debugger"
+      ? validText(report.diagnosis) && validText(report.reproduction)
+      : expectedRole === "coder"
+        ? Array.isArray(report.artifacts) && report.artifacts.length > 0 && report.artifacts.every(item => validText(item.path) && DIGEST.test(item.sha256 || ""))
+        : expectedRole === "tester"
+          ? Array.isArray(report.tests) && report.tests.length > 0 && report.tests.every(item => validText(item.command) && item.exit_code === 0)
+          : expectedRole === "governance"
+            ? report.decision === "approve" && Array.isArray(report.checks) && report.checks.length > 0 && report.checks.every(item => item.passed === true)
+            : false;
+    if (!reportOk) throw new Error("role-specific evidence report is incomplete");
+  }
+  const unsigned = Object.fromEntries(Object.entries(evidence).filter(([key]) => key !== "signature"));
+  if (!verifyWithPem(unsigned, signature, publicKeyPem)) throw new Error("invalid executor evidence signature");
+  return true;
+}
