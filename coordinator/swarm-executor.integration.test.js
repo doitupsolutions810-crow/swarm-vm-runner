@@ -92,7 +92,7 @@ test("real coordinator accepts Grok Bot signed evidence and advances the special
   const job = await created.json();
   const result = await executeRoleTask({
     job, role: "debugger", coordinatorUrl: coordinator.url, executorUrl: grok.url,
-    readToken: tokens.read, roleToken: tokens.debugger, executorToken: tokens.executor,
+    readToken: tokens.read, roleToken: tokens.debugger, executorToken: tokens.executor, claimToken: "test-claim-token-0123456789abcdef",
   });
   assert.equal(result.reported, true);
   const listed = await fetch(coordinator.url + "/api/jobs", { headers: { authorization: "Bearer " + tokens.read } });
@@ -131,7 +131,7 @@ test("coordinator rejects validly signed but out-of-order specialist evidence", 
   });
   const created = await fetch(coordinator.url + "/api/jobs", { method: "POST", headers: { authorization: "Bearer " + tokens.coordinator, "content-type": "application/json" }, body: JSON.stringify({ objective: "enforce specialist order" }) });
   const job = await created.json();
-  const result = await executeRoleTask({ job, role: "coder", coordinatorUrl: coordinator.url, executorUrl: grok.url, readToken: tokens.read, roleToken: tokens.coder, executorToken: tokens.executor });
+  const result = await executeRoleTask({ job, role: "coder", coordinatorUrl: coordinator.url, executorUrl: grok.url, readToken: tokens.read, roleToken: tokens.coder, executorToken: tokens.executor, claimToken: "test-claim-token-0123456789abcdef" });
   assert.equal(result.reported, false);
   assert.match(result.reason, /rejected evidence \(409\)/);
 });
