@@ -4,9 +4,11 @@ const COORDINATOR = process.env.COORDINATOR_URL || "http://127.0.0.1:4100";
 const NAME = process.env.INTERNAL_RUNNER_NAME || "control12-internal-1";
 const ROOT = process.env.SWARM_ROOT || path.resolve(".");
 const POLL_MS = Number(process.env.POLL_MS || 3000);
+const TOKEN = process.env.SWARM_API_TOKEN || "";
+if (TOKEN.length < 32) throw new Error("SWARM_API_TOKEN must be at least 32 characters");
 const ALLOWED = new Set(["prove-success", "health-probe", "inventory", "search", "spawn-subagent"]);
 async function claim() {
-  const res = await fetch(`${COORDINATOR}/api/runner/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runner: NAME }) });
+  const res = await fetch(`${COORDINATOR}/api/runner/claim`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ runner: NAME }) });
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`claim ${res.status}`);
   return res.json();
@@ -45,7 +47,7 @@ async function search(job) {
   if (!q) return { ok: false, note: "search query rejected" };
   const local = walkHits(ROOT, q, []);
   let remote = { hits: [] };
-  try { const res = await fetch(`${COORDINATOR}/api/search?q=${encodeURIComponent(q)}`); if (res.ok) remote = await res.json(); } catch {}
+  try { const res = await fetch(`${COORDINATOR}/api/search?q=${encodeURIComponent(q)}`, { headers: { authorization: `Bearer ${TOKEN}` } }); if (res.ok) remote = await res.json(); } catch {}
   return { ok: true, note: `${NAME} search q=${q} hits=${local.length + (remote.hits||[]).length}`, hits: [...local, ...(remote.hits||[])].slice(0, 20) };
 }
 async function spawnSubagent(job) {
