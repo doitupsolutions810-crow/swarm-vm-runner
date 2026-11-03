@@ -75,7 +75,7 @@ async function event(role, payload) {
   });
   const signed = signedRoleEvidence(role, payload);
   return request("/api/events", {
-    method: "POST", body: { ...payload, ...signed, role, ...(claim.status === 200 ? { claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId } : {}) },
+    method: "POST", body: { ...payload, ...signed, role, ...(claim.status === 200 ? { tenant: claim.body.tenant, claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId } : {}) },
     token: ROLE_TOKENS[role],
   });
 }
@@ -198,7 +198,7 @@ test("worker role cannot pass a job with missing or mismatched Grok Bot evidence
   const claimFields = { claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId };
   const missing = await request("/api/events", {
     method: "POST",
-    body: { jobId: job.id, role: "debugger", status: "passed", ...claimFields },
+    body: { jobId: job.id, tenant: claim.body.tenant, role: "debugger", status: "passed", ...claimFields },
     token: ROLE_TOKENS.debugger,
   });
   assert.equal(missing.status, 403);
@@ -206,7 +206,7 @@ test("worker role cannot pass a job with missing or mismatched Grok Bot evidence
   const mismatched = { ...signed.evidence, job_id: "job-forged" };
   const rejected = await request("/api/events", {
     method: "POST",
-    body: { jobId: job.id, role: "debugger", status: "passed", evidence: mismatched, evidence_signature: signed.evidence_signature, ...claimFields },
+    body: { jobId: job.id, tenant: claim.body.tenant, role: "debugger", status: "passed", evidence: mismatched, evidence_signature: signed.evidence_signature, ...claimFields },
     token: ROLE_TOKENS.debugger,
   });
   assert.equal(rejected.status, 403);
@@ -480,7 +480,7 @@ test("external executor can validate only the current active specialist claim", 
     method: "POST", body: { workerId: "worker-a", leaseMs: 30000 }, token: ROLE_TOKENS.debugger,
   });
   assert.equal(claim.status, 200);
-  const validBody = { jobId: job.id, workerId: "worker-a", claimToken: claim.body.claimToken };
+  const validBody = { jobId: job.id, tenant: job.tenant, workerId: "worker-a", claimToken: claim.body.claimToken };
   assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: validBody, token: ROLE_TOKENS.debugger })).status, 200);
   assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: { ...validBody, workerId: "worker-b" }, token: ROLE_TOKENS.debugger })).status, 403);
   assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: validBody, token: ROLE_TOKENS.coder })).status, 401);
@@ -497,7 +497,7 @@ test("external executor claim validation rejects an expired lease", async () => 
       method: "POST", body: { workerId: "worker-a", leaseMs: 1000 }, token: ROLE_TOKENS.debugger,
     });
     assert.equal(claim.status, 200);
-    const body = { jobId: job.id, workerId: "worker-a", claimToken: claim.body.claimToken };
+    const body = { jobId: job.id, tenant: job.tenant, workerId: "worker-a", claimToken: claim.body.claimToken };
     assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body, token: ROLE_TOKENS.debugger })).status, 200);
     clock += 1001;
     assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body, token: ROLE_TOKENS.debugger })).status, 409);
@@ -530,7 +530,7 @@ test("expired lease is reclaimed with a new token and stale completion is reject
     assert.equal(second.status, 200);
     assert.notEqual(second.body.claimToken, first.body.claimToken);
     const signed = signedRoleEvidence("debugger", { jobId: job.id, status: "passed" });
-    const stale = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: first.body.claimToken, workerId: first.body.lease.workerId }, token: ROLE_TOKENS.debugger });
+    const stale = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, tenant: first.body.tenant, claimToken: first.body.claimToken, workerId: first.body.lease.workerId }, token: ROLE_TOKENS.debugger });
     assert.equal(stale.status, 403);
   } finally {
     base = previous;
@@ -552,7 +552,7 @@ test("active specialist lease survives restart and remains protected until expir
     base = second.base;
     assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-b" }, token: ROLE_TOKENS.debugger })).status, 204);
     const signed = signedRoleEvidence("debugger", { jobId: job.id, status: "passed" });
-    const accepted = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId }, token: ROLE_TOKENS.debugger });
+    const accepted = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, tenant: claim.body.tenant, claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId }, token: ROLE_TOKENS.debugger });
     assert.equal(accepted.status, 200);
     await stop(second.instance);
   } finally {
