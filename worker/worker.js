@@ -14,13 +14,15 @@ async function tick() {
     (j) => j.status !== "completed" && j.status !== "failed" && j.chain[j.step] === ROLE
   );
   if (!mine) return;
-  const note = `${ROLE} accepted ${mine.id} (no in-process eval)`;
-  await fetch(`${COORDINATOR}/api/events`, {
+  // Do not mark a role passed merely because a worker polled the queue.
+  const note = `${ROLE} executor is not configured; no task was executed`;
+  const report = await fetch(`${COORDINATOR}/api/events`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${ROLE_TOKEN}` },
-    body: JSON.stringify({ jobId: mine.id, role: ROLE, status: "passed", note }),
+    body: JSON.stringify({ jobId: mine.id, role: ROLE, status: "failed", note }),
   });
-  console.log(note);
+  if (!report.ok) throw new Error(`event report ${report.status}`);
+  console.error(note);
 }
 
 setInterval(() => tick().catch((err) => console.error(ROLE, err.message)), POLL_MS);
