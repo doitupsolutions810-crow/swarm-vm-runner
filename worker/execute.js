@@ -7,7 +7,7 @@ function validateTimeoutMs(value, name) {
 
 export async function executeRoleTask({
   job, role, coordinatorUrl, executorUrl, readToken, roleToken, executorToken,
-  fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000, claimToken,
+  fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000, claimToken, signal,
 }) {
   executorTimeoutMs = validateTimeoutMs(executorTimeoutMs, "executorTimeoutMs");
   coordinatorTimeoutMs = validateTimeoutMs(coordinatorTimeoutMs, "coordinatorTimeoutMs");
@@ -17,13 +17,15 @@ export async function executeRoleTask({
   for (const [name, value] of Object.entries({ readToken, roleToken, executorToken })) {
     if (typeof value !== "string" || value.length < 32) throw new Error(name + " must be at least 32 characters");
   }
+  const executorSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(executorTimeoutMs)]) : AbortSignal.timeout(executorTimeoutMs);
+  const coordinatorSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(coordinatorTimeoutMs)]) : AbortSignal.timeout(coordinatorTimeoutMs);
   let executionResponse;
   try {
     executionResponse = await fetchImpl(executorUrl, {
       method: "POST",
       headers: { authorization: "Bearer " + executorToken, "content-type": "application/json" },
-      body: JSON.stringify({ jobId: job.id, role, objective: job.objective }),
-      signal: AbortSignal.timeout(executorTimeoutMs),
+      body: JSON.stringify({ jobId: job.id, role, objective: job.objective, ...(claimToken ? { claimToken } : {}) }),
+      signal: executorSignal,
     });
   } catch (error) {
     return { reported: false, pending: true, reason: "executor transport unavailable: " + error.message };
@@ -46,7 +48,7 @@ export async function executeRoleTask({
       method: "POST",
       headers: { authorization: "Bearer " + roleToken, "content-type": "application/json" },
       body: JSON.stringify({ jobId: job.id, role, status: expected, note, evidence: result.evidence, evidence_signature: result.evidence_signature, ...(claimToken ? { claimToken } : {}) }),
-      signal: AbortSignal.timeout(coordinatorTimeoutMs),
+      signal: coordinatorSignal,
     });
   } catch (error) {
     return { reported: false, pending: true, reason: "coordinator report outcome unknown: " + error.message };
