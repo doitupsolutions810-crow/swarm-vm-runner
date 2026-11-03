@@ -53,6 +53,8 @@ jobs:
         run: npm --prefix coordinator test
       - name: Worker syntax and bridge tests
         run: node --check worker/worker.js && node --check worker/execute.js && node --test worker/execute.test.js
+      - name: Internal runner syntax, lease heartbeat, and replay tests
+        run: node --check internal-runner/runner.mjs && node --check internal-runner/runner.test.mjs && node --test internal-runner/runner.test.mjs
       - name: Shell syntax check
         run: bash -n scripts/prove-success.sh && bash -n scripts/test-prove-success.sh
       - name: Proof script negative tests
