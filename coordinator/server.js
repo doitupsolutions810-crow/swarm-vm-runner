@@ -508,7 +508,16 @@ export function createServer({
         });
         return json(res, outcome.status, outcome.body);
       }
-      if (req.method === "GET" && url.pathname === "/api/runner/jobs") return json(res, 200, { jobs: [...runnerJobs.values()] });
+      if (req.method === "GET" && url.pathname === "/api/runner/jobs") {
+        // The runner credential is shared by the runner pool. A status listing
+        // must never disclose a live claim token that would let one runner
+        // impersonate another runner's lease owner.
+        const visibleJobs = [...runnerJobs.values()].map((job) => {
+          const { claimToken: _claimToken, ...visible } = job;
+          return visible;
+        });
+        return json(res, 200, { jobs: visibleJobs });
+      }
       if (req.method === "POST" && url.pathname === "/api/runner/jobs") {
         const payload = await readJson(req);
         const kind = typeof payload.kind === "string" ? payload.kind : "prove-success";
@@ -528,7 +537,8 @@ export function createServer({
         const outcome = await serializeMutation(async () => {
           const now = Date.now();
           for (const candidate of runnerJobs.values()) {
-            if (candidate.status === "running" && Number(candidate.leaseExpiresAt) <= now) {
+            const leaseExpiry = Number(candidate.leaseExpiresAt);
+            if (candidate.status === "running" && (!Number.isFinite(leaseExpiry) || leaseExpiry <= timestamp)) {
               const requeued = { ...candidate, status: "queued" };
               delete requeued.runner;
               delete requeued.claimToken;
@@ -543,7 +553,7 @@ export function createServer({
           if (!id) return null;
           const job = runnerJobs.get(id);
           if (!job || job.status !== "queued") return { status: 409, body: { error: "queue state inconsistent" } };
-          const claimed = { ...job, status: "running", runner: payload.runner, claimToken: randomUUID(), claimedAt: new Date().toISOString(), leaseExpiresAt: Date.now() + 30000 };
+          const claimed = { ...job, status: "running", runner: payload.runner, claimToken: randomUUID(), claimedAt: new Date().toISOString(), leaseExpiresAt: timestamp + 30000 };
           try { await persist({ type: "runner-job", job: claimed }); }
           catch (error) { runnerQueue.unshift(id); throw error; }
           runnerJobs.set(id, claimed);
@@ -559,6 +569,8 @@ export function createServer({
           if (!job) return { status: 404, body: { error: "unknown runner job" } };
           if (job.status !== "running") return { status: 409, body: { error: "runner job is not active" } };
           if (payload.runner !== job.runner || payload.claimToken !== job.claimToken) return { status: 403, body: { error: "runner claim does not match" } };
+          const leaseExpiry = Number(job.leaseExpiresAt);
+          if (!Number.isFinite(leaseExpiry) || leaseExpiry <= now()) return { status: 409, body: { error: "runner claim expired" } };
           if (typeof payload.ok !== "boolean") return { status: 400, body: { error: "ok boolean required" } };
           const completed = { ...job, status: payload.ok ? "completed" : "failed", note: typeof payload.note === "string" ? payload.note.slice(0, 500) : "", completedAt: new Date().toISOString() };
           if (Array.isArray(payload.hits)) completed.hits = payload.hits.slice(0, 20);
