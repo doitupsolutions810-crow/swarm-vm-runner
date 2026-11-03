@@ -8,3 +8,20 @@ services:
       - ${SWARM_AVRONE_ISSUER_PUBLIC_KEY_HOST_FILE:?set to AVRONE issuer public key}:/run/secrets/avrone-issuer.pub:ro
       - ${SWARM_RECEIPT_SIGNING_PRIVATE_KEY_HOST_FILE:?set to Swarm receipt private key}:/run/secrets/swarm-receipt.pem:ro
       - ${SWARM_EXECUTOR_PUBLIC_KEY_HOST_FILE:?set to Grok Bot executor public key}:/run/secrets/grok-swarm-executor.pub:ro
+
+  worker-debugger:
+    networks: [default, swarm-integration]
+
+  worker-coder:
+    networks: [default, swarm-integration]
+
+  worker-tester:
+    networks: [default, swarm-integration]
+
+  worker-governance:
+    networks: [default, swarm-integration]
+
+networks:
+  swarm-integration:
+    external: true
+    name: ${SWARM_INTEGRATION_NETWORK:-swarm-integration}
