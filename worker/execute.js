@@ -1,3 +1,9 @@
+export function matchesWorkerTenant(jobTenant, configuredTenant) {
+  return typeof jobTenant === "string" && jobTenant.length > 0
+    && typeof configuredTenant === "string" && configuredTenant.length > 0
+    && jobTenant === configuredTenant;
+}
+
 function validateTimeoutMs(value, name) {
   if (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647) {
     throw new RangeError(name + " must be an integer in 1..2147483647 milliseconds");
