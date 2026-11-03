@@ -60,6 +60,19 @@ async function tick() {
     }
     if (!result.reported) {
       console.error(ROLE, mine.id, result.reason || "execution remains pending");
+      if (result.retryable) {
+        try {
+          const released = await fetch(COORDINATOR + "/api/worker/" + ROLE + "/release", {
+            method: "POST",
+            headers: { authorization: "Bearer " + ROLE_TOKEN, "content-type": "application/json" },
+            body: JSON.stringify({ jobId: mine.id, tenant: mine.tenant, workerId: WORKER_ID, claimToken: mine.claimToken }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!released.ok) console.error(ROLE, mine.id, "could not release capacity-rejected claim (" + released.status + ")");
+        } catch (error) {
+          console.error(ROLE, mine.id, "could not release capacity-rejected claim:", error.message);
+        }
+      }
       return;
     }
     console.log(ROLE, mine.id, result.status, result.evidence.run_id);
