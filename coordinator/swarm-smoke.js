@@ -119,7 +119,7 @@ export function validateCompletedJob(job, {
     tenant: job.tenant,
     status: job.status,
     roles: job.events.map(event => ({ role: event.role, status: event.status, executor: event.evidence.executor })),
-    artifactCount: coder.artifacts.length,
+    artifactCount: coderReport.artifacts.length,
     testCommands: tester.tests.map(item => item.command),
     governance: governance.decision
   };
