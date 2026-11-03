@@ -502,7 +502,7 @@ test("expired lease is reclaimed with a new token and stale completion is reject
     assert.equal(second.status, 200);
     assert.notEqual(second.body.claimToken, first.body.claimToken);
     const signed = signedRoleEvidence("debugger", { jobId: job.id, status: "passed" });
-    const stale = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: first.body.claimToken }, token: ROLE_TOKENS.debugger });
+    const stale = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: first.body.claimToken, workerId: first.body.lease.workerId }, token: ROLE_TOKENS.debugger });
     assert.equal(stale.status, 403);
   } finally {
     base = previous;
@@ -524,7 +524,7 @@ test("active specialist lease survives restart and remains protected until expir
     base = second.base;
     assert.equal((await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-b" }, token: ROLE_TOKENS.debugger })).status, 204);
     const signed = signedRoleEvidence("debugger", { jobId: job.id, status: "passed" });
-    const accepted = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: claim.body.claimToken }, token: ROLE_TOKENS.debugger });
+    const accepted = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", ...signed, claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId }, token: ROLE_TOKENS.debugger });
     assert.equal(accepted.status, 200);
     await stop(second.instance);
   } finally {
