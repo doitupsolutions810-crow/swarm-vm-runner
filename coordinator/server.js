@@ -264,6 +264,8 @@ export function createServer({
           if (typeof roleToken !== "string" || roleToken.length < 32) return json(res, 503, { error: "role authentication is not configured" });
           if (!authorized(req, roleToken)) return json(res, 401, { error: "unauthorized worker role" });
           req.swarmPayload = payload;
+        } else if (req.method === "POST" && url.pathname === "/api/integration/enqueue") {
+          // The signed envelope and capability are the caller authentication boundary.
         } else {
           const credential = req.method === "GET" && (url.pathname === "/api/jobs" || url.pathname === "/api/search")
             ? readToken
