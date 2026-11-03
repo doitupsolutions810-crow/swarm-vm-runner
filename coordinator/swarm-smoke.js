@@ -7,7 +7,7 @@ import { verifySignedEvidence } from "./integration-contract.js";
 export const SWARM_ROLES = ["debugger", "coder", "tester", "governance"];
 
 export function smokeArtifactPaths(runTag) {
-  if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
+  if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,64}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
   const suffix = runTag.replace(/[^a-zA-Z0-9_-]/g, "-");
   return {
     textFile: `swarm-smoke-${suffix}.txt`,
@@ -34,11 +34,11 @@ export function smokeArtifactExpectations(runTag) {
 }
 
 export function buildSmokeObjective(runTag, repository, branch = "") {
-  if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
+  if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,64}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
   let parsed;
   try { parsed = new URL(String(repository)); } catch { throw new TypeError("SWARM_SMOKE_REPOSITORY must be an HTTPS Git URL"); }
-  if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password) throw new TypeError("SWARM_SMOKE_REPOSITORY must be an HTTPS Git URL");
-  if (branch && (typeof branch !== "string" || !/^[A-Za-z0-9._/-]{1,128}$/.test(branch))) throw new TypeError("invalid smoke branch");
+  if (String(repository).length > 256 || parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) throw new TypeError("SWARM_SMOKE_REPOSITORY must be an HTTPS Git URL");
+  if (branch && (typeof branch !== "string" || !/^[A-Za-z0-9._/-]{1,64}$/.test(branch))) throw new TypeError("invalid smoke branch");
   const { textFile: txt, testFile: spec } = smokeArtifactPaths(runTag);
   const expectedArtifacts = smokeArtifactExpectations(runTag);
   const expectedContent = "swarm execution verified for " + runTag.replace(/[^a-zA-Z0-9_-]/g, "-") + "\n";
@@ -51,7 +51,7 @@ export function buildSmokeObjective(runTag, repository, branch = "") {
     "});"
   ].join("\n") + "\n";
   const branchText = branch ? `The configured checkout branch is ${branch}. Do not switch branches.` : "Use the configured checkout branch.";
-  return [
+  const objective = [
     "REAL FOUR-ROLE SWARM ACCEPTANCE TASK.",
     `Target repository: ${parsed.toString()}`,
     branchText,
@@ -65,6 +65,8 @@ export function buildSmokeObjective(runTag, repository, branch = "") {
     "Governance: independently inspect both files, rerun the test, verify no existing files were changed, and approve only if every check passes.",
     "Do not fabricate terminal results, artifacts, hashes, or test outcomes."
   ].join("\n");
+  if (objective.length > 2000) throw new RangeError("smoke objective exceeds coordinator limit");
+  return objective;
 }
 
 export function validateCompletedJob(job, {
@@ -133,14 +135,18 @@ async function requestJson(fetchImpl, url, token, options = {}) {
   return body;
 }
 
-function boundedInteger(value, fallback, min, max) {
+export function boundedInteger(value, fallback, min, max) {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
 }
 
+export function smokeCoordinatorToken(env = {}) {
+  return env.SWARM_API_TOKEN || env.SWARM_TOKEN || "";
+}
+
 export async function runSwarmSmoke({ env = process.env, fetchImpl = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const baseUrl = String(env.COORDINATOR_URL || "http://127.0.0.1:4100").replace(/\/+$/, "");
-  const coordinatorToken = env.SWARM_API_TOKEN || env.SWARM_TOKEN || "";
+  const coordinatorToken = smokeCoordinatorToken(env);
   const readToken = env.SWARM_READ_TOKEN || "";
   const tenant = env.SWARM_TENANT || "";
   const executorId = env.SWARM_EXECUTOR_ID || "";
