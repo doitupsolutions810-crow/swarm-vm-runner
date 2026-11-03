@@ -53,7 +53,7 @@ async function tick() {
       result = await executeRoleTask({
         job: mine, role: ROLE, coordinatorUrl: COORDINATOR, executorUrl: EXECUTOR_URL,
         readToken: TOKEN, roleToken: ROLE_TOKEN, executorToken: EXECUTOR_TOKEN,
-        claimToken: mine.claimToken, workerId: WORKER_ID, signal: executionController.signal,
+        claimToken: mine.claimToken, workerId: WORKER_ID, tenant: mine.tenant, signal: executionController.signal,
       });
     } finally {
       clearInterval(heartbeat);
