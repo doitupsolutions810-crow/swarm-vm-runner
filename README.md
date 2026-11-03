@@ -116,3 +116,27 @@ The Grok Bot private signing key must remain in Grok Bot's local
 Runner's `secrets/grok-swarm-executor.pub`. Use four separate 32-byte-or-longer
 executor tokens, identical in the two `.env` files. Never commit either key or
 the local secret directory.
+
+
+### Run the live four-role acceptance smoke test
+
+After Grok Bot and all four specialist workers are healthy, provision
+`SWARM_SMOKE_REPOSITORY` and `SWARM_SMOKE_BRANCH` in the Swarm Runner
+environment. Configure the same repository and branch as
+`SWARM_DEFAULT_REPOSITORY` and `SWARM_DEFAULT_BRANCH` in Grok Bot. The
+repository must be readable by the sandbox. The smoke task creates two uniquely
+named untracked test artifacts in the isolated per-job checkout; it does not
+commit or push them.
+
+Run:
+
+```bash
+docker compose exec coordinator npm run smoke:swarm
+```
+
+The smoke runner creates a real task, waits for Debugger → Coder → Tester →
+Governance, verifies all four Ed25519 signatures against the pinned public key,
+checks tenant/job/executor identity, validates artifact digests and successful
+test evidence, and prints a compact acceptance receipt. A zero exit code is
+the live acceptance result. This does not replace the multi-instance lease,
+workspace cleanup, or production isolation gates.
