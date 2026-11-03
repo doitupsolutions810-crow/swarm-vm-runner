@@ -22,16 +22,17 @@ docker compose --profile runner --profile content up --build
 ## Coordinator authentication
 
 The coordinator keeps `/health` public for container health checks. Every `/api/*`
-route requires a bearer token. Set `SWARM_API_TOKEN` to a unique random value of
-at least 32 characters. Each worker event route additionally requires its own
-role credential: `SWARM_DEBUGGER_TOKEN`, `SWARM_CODER_TOKEN`,
-`SWARM_TESTER_TOKEN`, and `SWARM_GOVERNANCE_TOKEN`. Do not reuse one token
-across roles.
+route requires a bearer token with a narrow purpose: `SWARM_API_TOKEN` may create
+jobs, `SWARM_READ_TOKEN` may read jobs/search, `SWARM_RUNNER_TOKEN` may claim and
+complete internal-runner jobs, and each worker event requires its own role token:
+`SWARM_DEBUGGER_TOKEN`, `SWARM_CODER_TOKEN`, `SWARM_TESTER_TOKEN`, or
+`SWARM_GOVERNANCE_TOKEN`. Worker containers receive only the read token and
+their own role token. Do not reuse secrets across capabilities.
 
 Generate five independent values and place them in the local `.env` file:
 
 ```bash
-for name in SWARM_API_TOKEN SWARM_DEBUGGER_TOKEN SWARM_CODER_TOKEN SWARM_TESTER_TOKEN SWARM_GOVERNANCE_TOKEN; do
+for name in SWARM_API_TOKEN SWARM_READ_TOKEN SWARM_RUNNER_TOKEN SWARM_DEBUGGER_TOKEN SWARM_CODER_TOKEN SWARM_TESTER_TOKEN SWARM_GOVERNANCE_TOKEN; do
   printf '%s=%s\\n' "$name" "$(openssl rand -hex 32)"
 done
 ```
