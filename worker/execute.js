@@ -1,7 +1,17 @@
+function validateTimeoutMs(value, name) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647) {
+    throw new RangeError(name + " must be an integer in 1..2147483647 milliseconds");
+  }
+  return value;
+}
+
 export async function executeRoleTask({
   job, role, coordinatorUrl, executorUrl, readToken, roleToken, executorToken,
   fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000,
 }) {
+  executorTimeoutMs = validateTimeoutMs(executorTimeoutMs, "executorTimeoutMs");
+  coordinatorTimeoutMs = validateTimeoutMs(coordinatorTimeoutMs, "coordinatorTimeoutMs");
+
   if (!job || typeof job.id !== "string" || typeof job.objective !== "string") throw new Error("invalid coordinator job");
   if (!["debugger", "coder", "tester", "governance"].includes(role)) throw new Error("invalid specialist role");
   for (const [name, value] of Object.entries({ readToken, roleToken, executorToken })) {
@@ -13,7 +23,7 @@ export async function executeRoleTask({
       method: "POST",
       headers: { authorization: "Bearer " + executorToken, "content-type": "application/json" },
       body: JSON.stringify({ jobId: job.id, role, objective: job.objective }),
-      signal: AbortSignal.timeout(35_000),
+      signal: AbortSignal.timeout(executorTimeoutMs),
     });
   } catch (error) {
     return { reported: false, pending: true, reason: "executor transport unavailable: " + error.message };
@@ -36,7 +46,7 @@ export async function executeRoleTask({
       method: "POST",
       headers: { authorization: "Bearer " + roleToken, "content-type": "application/json" },
       body: JSON.stringify({ jobId: job.id, role, status: expected, note, evidence: result.evidence, evidence_signature: result.evidence_signature }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(coordinatorTimeoutMs),
     });
   } catch (error) {
     return { reported: false, pending: true, reason: "coordinator report outcome unknown: " + error.message };
