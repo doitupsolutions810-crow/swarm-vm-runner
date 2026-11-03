@@ -6,28 +6,44 @@ export async function authorizeAndEnqueue({ request, trust, nowMs = Date.now(), 
   if (typeof commit !== "function") throw new TypeError("durable commit callback is required");
   if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("integration request must be an object");
   const { envelope, payload, capability, capability_signature: capabilitySignature, action } = request;
-  const envelopeResult = verifyEnvelope({
-    envelope, payload,
-    publicKeyPem: trust.avroneIssuerPublicKeyPem,
-    expectedIssuer: trust.avroneIssuer,
-    expectedAudience: trust.swarmAudience,
-    nowMs,
-  });
+  let envelopeResult;
+  try {
+    envelopeResult = verifyEnvelope({
+      envelope, payload,
+      publicKeyPem: trust.avroneIssuerPublicKeyPem,
+      expectedIssuer: trust.avroneIssuer,
+      expectedAudience: trust.swarmAudience,
+      nowMs,
+    });
+  } catch (error) {
+    error.status = 401;
+    throw error;
+  }
   if (envelope.capability_id !== capability?.id) throw new Error("envelope capability_id does not match supplied capability");
-  const capabilityResult = verifyCapability({
-    capability, signature: capabilitySignature,
-    publicKeyB64: trust.capabilityAuthorityPublicKeyB64,
-    expectedIssuer: trust.capabilityAuthorityIssuer,
-    expectedAudience: trust.swarmAudience,
-    action,
-    nowMs,
-  });
+  let capabilityResult;
+  try {
+    capabilityResult = verifyCapability({
+      capability, signature: capabilitySignature,
+      publicKeyB64: trust.capabilityAuthorityPublicKeyB64,
+      expectedIssuer: trust.capabilityAuthorityIssuer,
+      expectedAudience: trust.swarmAudience,
+      action,
+      nowMs,
+    });
+  } catch (error) {
+    error.status = 403;
+    throw error;
+  }
   if (action.type !== ENQUEUE_ACTION.type || action.resource !== ENQUEUE_ACTION.resource || action.method !== ENQUEUE_ACTION.method) {
     throw new Error("only Execute:swarm.jobs:POST is currently implemented");
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)
       || typeof payload.objective !== "string" || !payload.objective.trim()
-      || payload.objective.length > 2000) throw new Error("payload.objective must contain 1..2000 characters");
+      || payload.objective.length > 2000) {
+    const error = new Error("payload.objective must contain 1..2000 characters");
+    error.status = 400;
+    throw error;
+  }
   const receiptFields = {
     message_id: envelope.message_id,
     correlation_id: envelope.correlation_id,
