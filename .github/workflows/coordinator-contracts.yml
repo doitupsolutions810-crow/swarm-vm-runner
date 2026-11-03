@@ -10,6 +10,8 @@ on:
       - "scripts/prove-success.sh"
       - "scripts/test-prove-success.sh"
       - "docker-compose.yml"
+      - "docker-compose.swarm.yml"
+      - "docs/**"
       - ".env.example"
       - "SUCCESS_CRITERIA.md"
       - ".github/workflows/coordinator-contracts.yml"
