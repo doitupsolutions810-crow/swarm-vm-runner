@@ -483,6 +483,7 @@ test("external executor can validate only the current active specialist claim", 
   const validBody = { jobId: job.id, tenant: job.tenant, workerId: "worker-a", claimToken: claim.body.claimToken };
   assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: validBody, token: ROLE_TOKENS.debugger })).status, 200);
   assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: { ...validBody, workerId: "worker-b" }, token: ROLE_TOKENS.debugger })).status, 403);
+  assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: { ...validBody, tenant: "another-tenant" }, token: ROLE_TOKENS.debugger })).status, 403);
   assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: validBody, token: ROLE_TOKENS.coder })).status, 401);
 });
 
