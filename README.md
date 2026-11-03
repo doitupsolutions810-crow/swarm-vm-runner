@@ -43,6 +43,13 @@ terminal-state reports, and binds runner completion to the runner that claimed
 the job. These controls harden the coordinator protocol; they do not make the
 optional GitHub Actions runner safe for untrusted pull-request code.
 
+**Execution-adapter gap:** the four current role worker containers are still
+protocol stubs. They deliberately report `failed` instead of `passed` until a
+real task executor is configured and returns independently verifiable evidence.
+A completed role-message chain is not proof that code was written, tested, or
+reviewed. Do not promote this swarm to production or connect it to AVRONE as a
+trusted executor yet.
+
 Run the coordinator contract suite with:
 
 ```bash
