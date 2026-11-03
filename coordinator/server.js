@@ -292,7 +292,7 @@ export function createServer({
         } else if (req.method === "POST" && url.pathname === "/api/integration/enqueue") {
           // The signed envelope and capability are the caller authentication boundary.
         } else {
-          const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew)$/.exec(url.pathname);
+          const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew|validate)$/.exec(url.pathname);
           const credential = workerRoute ? roleTokens?.[workerRoute[1]]
             : req.method === "GET" && (url.pathname === "/api/jobs" || url.pathname === "/api/search")
               ? readToken
@@ -343,7 +343,27 @@ export function createServer({
         });
         return json(res, 200, { jobs: visibleJobs });
       }
-      const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew)$/.exec(url.pathname);
+      const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew|validate)$/.exec(url.pathname);
+      if (req.method === "POST" && workerRoute && workerRoute[2] === "validate") {
+        const payload = await readJson(req);
+        const role = workerRoute[1];
+        if (typeof payload.jobId !== "string" || typeof payload.workerId !== "string"
+            || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.workerId)
+            || typeof payload.claimToken !== "string" || payload.claimToken.length < 32) {
+          return json(res, 400, { error: "jobId, workerId, and claimToken required" });
+        }
+        const job = jobs.get(payload.jobId);
+        if (!job) return json(res, 404, { error: "unknown job" });
+        const lease = job.lease;
+        if (!lease || lease.role !== role || lease.workerId !== payload.workerId || lease.claimToken !== payload.claimToken) {
+          return json(res, 403, { error: "active specialist claim does not match" });
+        }
+        if (Number(lease.expiresAt) <= now()) return json(res, 409, { error: "specialist claim expired" });
+        if (job.chain?.[job.step] !== role || job.status === "completed" || job.status === "failed") {
+          return json(res, 409, { error: "job is no longer claimable by this role" });
+        }
+        return json(res, 200, { valid: true, jobId: job.id, role, workerId: lease.workerId, leaseExpiresAt: lease.expiresAt });
+      }
       if (req.method === "POST" && workerRoute && workerRoute[2] === "claim") {
         const payload = await readJson(req);
         const role = workerRoute[1];
