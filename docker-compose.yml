@@ -45,7 +45,7 @@ services:
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_DEBUGGER_TOKEN}
       SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
-      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_TOKEN}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_DEBUGGER_TOKEN}
     networks: [default, swarm-integration]
     depends_on:
       coordinator:
@@ -60,7 +60,7 @@ services:
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_CODER_TOKEN}
       SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
-      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_TOKEN}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_CODER_TOKEN}
     networks: [default, swarm-integration]
     depends_on:
       coordinator:
@@ -75,7 +75,7 @@ services:
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_TESTER_TOKEN}
       SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
-      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_TOKEN}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_TESTER_TOKEN}
     networks: [default, swarm-integration]
     depends_on:
       coordinator:
@@ -90,7 +90,7 @@ services:
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_GOVERNANCE_TOKEN}
       SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
-      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_TOKEN}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_GOVERNANCE_TOKEN}
     networks: [default, swarm-integration]
     depends_on:
       coordinator:
