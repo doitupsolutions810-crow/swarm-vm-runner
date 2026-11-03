@@ -177,3 +177,15 @@ test("rejects invalid or unsafe timeout values before making network calls", asy
   );
   assert.equal(calls, 0);
 });
+
+
+test("executor transport failure with a configured deadline remains pending", async () => {
+  const out = await executeRoleTask({
+    job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
+    ...tokens, executorTimeoutMs: 2_500,
+    fetchImpl: async () => { throw new Error("socket timeout"); },
+  });
+  assert.equal(out.reported, false);
+  assert.equal(out.pending, true);
+  assert.match(out.reason, /transport unavailable/);
+});
