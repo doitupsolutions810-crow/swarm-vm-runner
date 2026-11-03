@@ -180,6 +180,25 @@ test("concurrent duplicate role reports have exactly one winner", async () => {
   assert.equal(stored.events.filter((item) => item.role === "debugger").length, 1);
 });
 
+test("worker role cannot pass a job with missing or mismatched Grok Bot evidence", async () => {
+  const job = await createJob("signed evidence boundary");
+  const missing = await request("/api/events", {
+    method: "POST",
+    body: { jobId: job.id, role: "debugger", status: "passed" },
+    token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(missing.status, 403);
+  const signed = signedRoleEvidence("debugger", { jobId: job.id, status: "passed" });
+  const mismatched = { ...signed.evidence, job_id: "job-forged" };
+  const rejected = await request("/api/events", {
+    method: "POST",
+    body: { jobId: job.id, role: "debugger", status: "passed", evidence: mismatched, evidence_signature: signed.evidence_signature },
+    token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(rejected.status, 403);
+  assert.equal((await request("/api/jobs")).body.jobs.find((item) => item.id === job.id).events.length, 0);
+});
+
 test("worker events require the dedicated role token, not the coordinator token", async () => {
   const job = await createJob();
   const denied = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed" }, token: TOKEN });
