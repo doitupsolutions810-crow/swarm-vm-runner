@@ -32,8 +32,8 @@ async function stop(instance, { removeState = true } = {}) {
   if (instance?.listening) await new Promise((resolve, reject) => instance.close((error) => error ? reject(error) : resolve()));
   if (removeState && instance?.stateDir) fs.rmSync(instance.stateDir, { recursive: true, force: true });
 }
-async function request(path, { method = "GET", body, token, contentType = "application/json" } = {}) {
-  const headers = {};
+async function request(path, { method = "GET", body, token, contentType = "application/json", extraHeaders = {} } = {}) {
+  const headers = { ...extraHeaders };
   let credential = token;
   if (credential === undefined) {
     if (path.startsWith("/api/events")) credential = ROLE_TOKENS[body?.role];
@@ -484,6 +484,186 @@ test("expired runner lease cannot complete before reclamation and stale token st
   } finally {
     base = previous;
     await stop(isolated.instance);
+  }
+});
+
+test("runner lease renewal keeps long work valid and never returns the claim token", async () => {
+  let clock = Date.now();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-runner-renew-"));
+  const isolated = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir, 500, { now: () => clock });
+  const previous = base;
+  base = isolated.base;
+  try {
+    const queued = await request("/api/runner/jobs", {
+      method: "POST", body: { kind: "inventory", objective: "renew this runner lease" },
+    });
+    const first = await request("/api/runner/claim", {
+      method: "POST", body: { runner: "worker-renew", leaseMs: 10000 },
+    });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.id, queued.body.id);
+    assert.equal(first.body.leaseExpiresAt, clock + 10000);
+
+    const wrongRunner = await request("/api/runner/renew", {
+      method: "POST",
+      body: { id: first.body.id, runner: "worker-other", claimToken: first.body.claimToken, leaseMs: 15000 },
+    });
+    assert.equal(wrongRunner.status, 403);
+    const wrongToken = await request("/api/runner/renew", {
+      method: "POST",
+      body: { id: first.body.id, runner: "worker-renew", claimToken: "x".repeat(40), leaseMs: 15000 },
+    });
+    assert.equal(wrongToken.status, 403);
+
+    clock += 8000;
+    const renewed = await request("/api/runner/renew", {
+      method: "POST",
+      body: { id: first.body.id, runner: "worker-renew", claimToken: first.body.claimToken, leaseMs: 15000 },
+    });
+    assert.equal(renewed.status, 200);
+    assert.equal(renewed.body.leaseExpiresAt, clock + 15000);
+    assert.equal("claimToken" in renewed.body, false);
+
+    // The original 10-second expiry has passed, but the current renewed lease is valid.
+    clock += 3000;
+    const completed = await request("/api/runner/complete", {
+      method: "POST",
+      body: { id: first.body.id, runner: "worker-renew", claimToken: first.body.claimToken, ok: true },
+    });
+    assert.equal(completed.status, 200);
+    assert.equal(completed.body.status, "completed");
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runner renewal rejects invalid and expired lease durations and cannot revive a stale lease", async () => {
+  let clock = Date.now();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-runner-renew-reject-"));
+  const isolated = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir, 500, { now: () => clock });
+  const previous = base;
+  base = isolated.base;
+  try {
+    const queued = await request("/api/runner/jobs", {
+      method: "POST", body: { kind: "inventory", objective: "reject unsafe lease values" },
+    });
+    const invalidClaim = await request("/api/runner/claim", {
+      method: "POST", body: { runner: "worker-a", leaseMs: 4999 },
+    });
+    assert.equal(invalidClaim.status, 400);
+    const first = await request("/api/runner/claim", {
+      method: "POST", body: { runner: "worker-a", leaseMs: 10000 },
+    });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.id, queued.body.id);
+
+    for (const leaseMs of [4999, 120001, 5000.5, "10000"]) {
+      const invalidRenewal = await request("/api/runner/renew", {
+        method: "POST",
+        body: { id: first.body.id, runner: "worker-a", claimToken: first.body.claimToken, leaseMs },
+      });
+      assert.equal(invalidRenewal.status, 400, String(leaseMs));
+    }
+
+    clock += 10001;
+    const expiredRenewal = await request("/api/runner/renew", {
+      method: "POST",
+      body: { id: first.body.id, runner: "worker-a", claimToken: first.body.claimToken, leaseMs: 30000 },
+    });
+    assert.equal(expiredRenewal.status, 409);
+
+    const second = await request("/api/runner/claim", {
+      method: "POST", body: { runner: "worker-b", leaseMs: 10000 },
+    });
+    assert.equal(second.status, 200);
+    assert.equal(second.body.id, first.body.id);
+    const staleRenewal = await request("/api/runner/renew", {
+      method: "POST",
+      body: { id: second.body.id, runner: "worker-a", claimToken: first.body.claimToken, leaseMs: 10000 },
+    });
+    assert.equal(staleRenewal.status, 403);
+    const validRenewal = await request("/api/runner/renew", {
+      method: "POST",
+      body: { id: second.body.id, runner: "worker-b", claimToken: second.body.claimToken, leaseMs: 10000 },
+    });
+    assert.equal(validRenewal.status, 200);
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("job idempotency returns the same job, rejects changed objectives, and hides key material", async () => {
+  const key = "spawn:run-123";
+  const first = await request("/api/jobs", {
+    method: "POST", body: { objective: "create exactly one child job" },
+    extraHeaders: { "idempotency-key": key },
+  });
+  assert.equal(first.status, 202);
+  const replay = await request("/api/jobs", {
+    method: "POST", body: { objective: "  create exactly one child job  " },
+    extraHeaders: { "idempotency-key": key },
+  });
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.id, first.body.id);
+  assert.equal(replay.body.idempotent_replay, true);
+
+  const conflict = await request("/api/jobs", {
+    method: "POST", body: { objective: "create a different child job" },
+    extraHeaders: { "idempotency-key": key },
+  });
+  assert.equal(conflict.status, 409);
+
+  for (const badKey of ["", "bad/key", "contains spaces", "x".repeat(129)]) {
+    const response = await request("/api/jobs", {
+      method: "POST", body: { objective: "reject malformed key" },
+      extraHeaders: { "idempotency-key": badKey },
+    });
+    assert.equal(response.status, 400, JSON.stringify(badKey));
+  }
+  const listed = await request("/api/jobs");
+  const visible = listed.body.jobs.find(job => job.id === first.body.id);
+  assert.ok(visible);
+  assert.equal("idempotencyKey" in visible, false);
+  assert.equal("idempotencyDigest" in visible, false);
+});
+
+test("concurrent and post-restart job idempotency creates one durable child", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-job-idempotency-"));
+  const previous = base;
+  let isolated = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir, 3);
+  base = isolated.base;
+  const key = "spawn:run-persistent";
+  try {
+    const requests = await Promise.all(Array.from({ length: 8 }, () => request("/api/jobs", {
+      method: "POST",
+      body: { objective: "one subagent across concurrent retries" },
+      extraHeaders: { "idempotency-key": key },
+    })));
+    assert.equal(requests.filter(result => result.status === 202).length, 1);
+    assert.equal(requests.filter(result => result.status === 200).length, 7);
+    assert.equal(new Set(requests.map(result => result.body.id)).size, 1);
+    const jobId = requests[0].body.id;
+
+    await stop(isolated.instance, { removeState: false });
+    isolated = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir, 3);
+    base = isolated.base;
+    const afterRestart = await request("/api/jobs", {
+      method: "POST",
+      body: { objective: "one subagent across concurrent retries" },
+      extraHeaders: { "idempotency-key": key },
+    });
+    assert.equal(afterRestart.status, 200);
+    assert.equal(afterRestart.body.id, jobId);
+    const jobs = await request("/api/jobs");
+    assert.equal(jobs.body.jobs.filter(job => job.id === jobId).length, 1);
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+    fs.rmSync(stateDir, { recursive: true, force: true });
   }
 });
 
