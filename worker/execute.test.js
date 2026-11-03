@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { executeRoleTask } from "./execute.js";
 const tokens = { readToken: "r".repeat(40), roleToken: "o".repeat(40), executorToken: "e".repeat(40) };
-const job = { id: "job-1", objective: "run tests" };
+const job = { id: "job-1", tenant: "test-tenant", objective: "run tests" };
 const good = { evidence: { job_id: "job-1", role: "tester", status: "succeeded", report: { tests: [{ command: "npm test", exit_code: 0 }] } }, evidence_signature: "signature" };
 
 test("calls Grok Bot and forwards signed evidence to coordinator", async () => {
@@ -12,13 +12,14 @@ test("calls Grok Bot and forwards signed evidence to coordinator", async () => {
     calls.push({ url, opts });
     return calls.length === 1 ? { status: 200, json: async () => good } : { ok: true, status: 200 };
   };
-  const out = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok/api/swarm/execute", ...tokens, workerId: "tester-worker-1", claimToken: "c".repeat(40), fetchImpl });
+  const out = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok/api/swarm/execute", ...tokens, workerId: "tester-worker-1", tenant: job.tenant, claimToken: "c".repeat(40), fetchImpl });
   assert.equal(out.reported, true);
   assert.equal(calls.length, 2);
   const body = JSON.parse(calls[1].opts.body);
   assert.equal(body.status, "passed");
   assert.equal(body.evidence_signature, "signature");
   assert.equal(body.workerId, "tester-worker-1");
+  assert.equal(body.tenant, job.tenant);
   assert.equal(body.claimToken, "c".repeat(40));
 });
 
@@ -189,12 +190,12 @@ test("executor request forwards the active claim and role-scoped coordinator cre
   };
   const out = await executeRoleTask({
     job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
-    ...tokens, workerId: "tester-worker-7", claimToken: "c".repeat(40), fetchImpl,
+    ...tokens, workerId: "tester-worker-7", tenant: job.tenant, claimToken: "c".repeat(40), fetchImpl,
   });
   assert.equal(out.reported, true);
   assert.equal(calls[0].options.headers["x-swarm-coordinator-token"], tokens.roleToken);
   assert.deepEqual(JSON.parse(calls[0].options.body), {
-    jobId: job.id, role: "tester", objective: job.objective,
+    jobId: job.id, role: "tester", objective: job.objective, tenant: job.tenant,
     claimToken: "c".repeat(40), workerId: "tester-worker-7",
   });
 });
