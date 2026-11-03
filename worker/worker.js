@@ -15,6 +15,7 @@ async function tick() {
   );
   if (!mine) return;
   // Do not mark a role passed merely because a worker polled the queue.
+  // No real task executor is wired yet. Never turn a queue poll into a false pass.
   const note = `${ROLE} executor is not configured; no task was executed`;
   const report = await fetch(`${COORDINATOR}/api/events`, {
     method: "POST",
@@ -25,5 +26,6 @@ async function tick() {
   console.error(note);
 }
 
+tick().catch((err) => console.error(ROLE, err.message));
 setInterval(() => tick().catch((err) => console.error(ROLE, err.message)), POLL_MS);
 console.log(`worker role=${ROLE}`);
