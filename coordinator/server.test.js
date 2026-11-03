@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { createServer } from "./server.js";
 
 const TOKEN = "test-token-0123456789abcdef0123456789abcdef";
+const ROLE_TOKENS = Object.fromEntries(["debugger", "coder", "tester", "governance"].map((role) => [role, `role-${role}-token-0123456789abcdef`]));
 let server;
 let base;
 let state;
 
 async function start(token = TOKEN) {
-  const instance = createServer({ token, tenant: "test-tenant" });
+  const instance = createServer({ token, roleTokens: ROLE_TOKENS, tenant: "test-tenant" });
   await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
   return { instance, base: `http://127.0.0.1:${instance.address().port}` };
 }
@@ -22,6 +23,9 @@ async function request(path, { method = "GET", body, token = TOKEN, contentType 
   const response = await fetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+async function event(role, payload) {
+  return request("/api/events", { method: "POST", body: { ...payload, role }, token: ROLE_TOKENS[role] });
 }
 async function createJob(objective = "verify orchestration") {
   const response = await request("/api/jobs", { method: "POST", body: { objective } });
@@ -81,12 +85,20 @@ test("JSON endpoints reject incorrect content type", async () => {
   assert.equal((await request("/api/jobs", { method: "POST", body: "objective=hello", contentType: "text/plain" })).status, 415);
 });
 
+test("worker events require the dedicated role token, not the coordinator token", async () => {
+  const job = await createJob();
+  const denied = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed" }, token: TOKEN });
+  assert.equal(denied.status, 401);
+  const accepted = await event("debugger", { jobId: job.id, status: "passed" });
+  assert.equal(accepted.status, 200);
+});
+
 test("only the expected role may advance a job, in strict order", async () => {
   const job = await createJob();
-  const wrong = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "coder", status: "passed" } });
+  const wrong = await event("coder", { jobId: job.id, status: "passed" });
   assert.equal(wrong.status, 409);
   assert.equal(wrong.body.expectedRole, "debugger");
-  const first = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed", note: "ok" } });
+  const first = await event("debugger", { jobId: job.id, status: "passed", note: "ok" });
   assert.equal(first.status, 200);
   assert.equal(first.body.step, 1);
   assert.equal(first.body.status, "running");
@@ -94,31 +106,31 @@ test("only the expected role may advance a job, in strict order", async () => {
 
 test("duplicate role reports and invalid event states cannot advance the chain", async () => {
   const job = await createJob();
-  assert.equal((await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "running" } })).status, 400);
-  await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed" } });
+  assert.equal((await event("debugger", { jobId: job.id, status: "running" })).status, 400);
+  await event("debugger", { jobId: job.id, status: "passed" });
   const duplicate = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed" } });
   assert.equal(duplicate.status, 409);
-  assert.equal((await request("/api/events", { method: "POST", body: { jobId: "missing", role: "debugger", status: "passed" } })).status, 404);
+  assert.equal((await event("debugger", { jobId: "missing", status: "passed" })).status, 404);
 });
 
 test("failed role terminates job and later role events are refused", async () => {
   const job = await createJob();
-  const failed = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "failed", note: "blocked" } });
+  const failed = await event("debugger", { jobId: job.id, status: "failed", note: "blocked" });
   assert.equal(failed.body.status, "failed");
-  assert.equal((await request("/api/events", { method: "POST", body: { jobId: job.id, role: "coder", status: "passed" } })).status, 409);
+  assert.equal((await event("coder", { jobId: job.id, status: "passed" })).status, 409);
 });
 
 test("all four ordered roles are required before a job completes", async () => {
   const job = await createJob();
   for (const role of ["debugger", "coder", "tester", "governance"]) {
-    const response = await request("/api/events", { method: "POST", body: { jobId: job.id, role, status: "passed", note: "done".repeat(300) } });
+    const response = await event(role, { jobId: job.id, status: "passed", note: "done".repeat(300) });
     assert.equal(response.status, 200);
     assert.ok(response.body.events.at(-1).note.length <= 500);
   }
   const final = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
   assert.equal(final.status, "completed");
   assert.equal(final.events.length, 4);
-  assert.equal((await request("/api/events", { method: "POST", body: { jobId: job.id, role: "governance", status: "passed" } })).status, 409);
+  assert.equal((await event("governance", { jobId: job.id, status: "passed" })).status, 409);
 });
 
 test("runner jobs are allowlisted and claims are single-owner", async () => {
