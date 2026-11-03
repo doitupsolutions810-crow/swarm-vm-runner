@@ -105,14 +105,19 @@ export function createServer({
   let persistQueue = Promise.resolve();
   let stateMutationQueue = Promise.resolve();
 
+  function repairJournalTail() {
+    if (!fs.existsSync(journalPath)) return;
+    const raw = fs.readFileSync(journalPath);
+    if (raw.length > 0 && raw[raw.length - 1] !== 0x0a) {
+      const lastNewline = raw.lastIndexOf(0x0a);
+      fs.truncateSync(journalPath, lastNewline + 1);
+    }
+  }
+  repairJournalTail();
+
   if (fs.existsSync(journalPath)) {
     const raw = fs.readFileSync(journalPath, "utf8");
     const lines = raw.split("\n");
-    if (!raw.endsWith("\n")) {
-      lines.pop();
-      const lastNewline = raw.lastIndexOf("\n");
-      fs.truncateSync(journalPath, lastNewline + 1);
-    }
     for (const line of lines) {
       if (!line) continue;
       const record = JSON.parse(line);
@@ -150,6 +155,7 @@ export function createServer({
 
   function persist(record) {
     const operation = persistQueue.then(async () => {
+      repairJournalTail();
       const handle = await fs.promises.open(journalPath, "a", 0o600);
       try {
         await handle.writeFile(JSON.stringify(record) + "\n", "utf8");
