@@ -12,12 +12,14 @@ test("calls Grok Bot and forwards signed evidence to coordinator", async () => {
     calls.push({ url, opts });
     return calls.length === 1 ? { status: 200, json: async () => good } : { ok: true, status: 200 };
   };
-  const out = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok/api/swarm/execute", ...tokens, fetchImpl });
+  const out = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok/api/swarm/execute", ...tokens, workerId: "tester-worker-1", claimToken: "c".repeat(40), fetchImpl });
   assert.equal(out.reported, true);
   assert.equal(calls.length, 2);
   const body = JSON.parse(calls[1].opts.body);
   assert.equal(body.status, "passed");
   assert.equal(body.evidence_signature, "signature");
+  assert.equal(body.workerId, "tester-worker-1");
+  assert.equal(body.claimToken, "c".repeat(40));
 });
 
 test("executor outage leaves job pending and never fabricates a failure event", async () => {
