@@ -177,6 +177,10 @@ export function createServer({
       if (record.type === "job" && record.job && typeof record.job.id === "string") {
         jobs.set(record.job.id, record.job);
         if (typeof record.job.idempotencyKey === "string" && typeof record.job.idempotencyDigest === "string") {
+          const prior = jobIdempotency.get(record.job.idempotencyKey);
+          if (prior && (prior.jobId !== record.job.id || prior.digest !== record.job.idempotencyDigest)) {
+            throw new Error("coordinator journal contains conflicting job idempotency records");
+          }
           jobIdempotency.set(record.job.idempotencyKey, { jobId: record.job.id, digest: record.job.idempotencyDigest });
         }
         const n = Number(record.job.id.replace(/^job-/, ""));
@@ -364,6 +368,8 @@ export function createServer({
       if (req.method === "GET" && url.pathname === "/api/jobs") {
         const visibleJobs = [...jobs.values()].map((job) => {
           const copy = structuredClone(job);
+          delete copy.idempotencyKey;
+          delete copy.idempotencyDigest;
           if (copy.lease) copy.lease = { role: copy.lease.role, workerId: copy.lease.workerId, expiresAt: copy.lease.expiresAt };
           return copy;
         });
@@ -471,9 +477,10 @@ export function createServer({
           return json(res, 400, { error: "idempotency-key must be 1..128 safe characters" });
         }
         const result = await serializeMutation(() => createSwarmJob(payload.objective, idempotencyKey));
+        const { idempotencyKey: _key, idempotencyDigest: _digest, ...visibleJob } = result.job;
         return json(res, result.idempotentReplay ? 200 : 202, result.idempotentReplay
-          ? { ...result.job, idempotent_replay: true }
-          : result.job);
+          ? { ...visibleJob, idempotent_replay: true }
+          : visibleJob);
       }
       if (req.method === "POST" && url.pathname === "/api/multi-agent-debug") {
         const payload = await readJson(req);
