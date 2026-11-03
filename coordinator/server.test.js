@@ -75,7 +75,7 @@ async function event(role, payload) {
   });
   const signed = signedRoleEvidence(role, payload);
   return request("/api/events", {
-    method: "POST", body: { ...payload, ...signed, role, ...(claim.status === 200 ? { claimToken: claim.body.claimToken } : {}) },
+    method: "POST", body: { ...payload, ...signed, role, ...(claim.status === 200 ? { claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId } : {}) },
     token: ROLE_TOKENS[role],
   });
 }
