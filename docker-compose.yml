@@ -13,6 +13,7 @@ services:
       SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64: ${SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64:-}
       SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE: ${SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE:-}
       SWARM_EXECUTOR_PUBLIC_KEY_FILE: ${SWARM_EXECUTOR_PUBLIC_KEY_FILE:-}
+      SWARM_EXECUTOR_PUBLIC_KEY_FILE: ${SWARM_EXECUTOR_PUBLIC_KEY_FILE:-}
       SWARM_EXECUTOR_ID: ${SWARM_EXECUTOR_ID:-spiffe://prod/agent/grok-bot}
       SWARM_AVRONE_ISSUER: ${SWARM_AVRONE_ISSUER:-}
       SWARM_SERVICE_IDENTITY: ${SWARM_SERVICE_IDENTITY:-}
@@ -31,6 +32,7 @@ services:
     volumes:
       - swarm-data:/var/swarm
       - ./secrets:/run/secrets:ro
+    networks: [default, swarm-integration]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1))"]
       interval: 10s
