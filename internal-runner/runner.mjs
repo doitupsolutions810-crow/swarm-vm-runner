@@ -17,8 +17,8 @@ async function claim() {
   if (!res.ok) throw new Error(`claim ${res.status}`);
   return res.json();
 }
-async function complete(id, result) {
-  const res = await fetch(`${COORDINATOR}/api/runner/complete`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${RUNNER_TOKEN}` }, body: JSON.stringify({ id, runner: NAME, ...result }) });
+async function complete(id, claimToken, result) {
+  const res = await fetch(`${COORDINATOR}/api/runner/complete`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${RUNNER_TOKEN}` }, body: JSON.stringify({ id, runner: NAME, claimToken, ...result }) });
   if (!res.ok) throw new Error(`complete ${res.status}`);
 }
 function safeQuery(raw) {
@@ -75,7 +75,7 @@ async function tick() {
   const job = await claim();
   if (!job) return;
   const result = await runAllowlisted(job);
-  await complete(job.id, result);
+  await complete(job.id, job.claimToken, result);
   console.log(`${NAME} ${job.id} ${result.ok ? "ok" : "deny"} ${result.note}`);
 }
 console.log(`internal runner ${NAME} polling ${COORDINATOR} allow=${[...ALLOWED].join(",")}`);
