@@ -123,3 +123,53 @@ test("verifies Grok Bot signed role evidence and rejects identity or report tamp
   assert.throws(() => verifySignedEvidence({ ...args, expectedJobId: "job-78" }), /identity mismatch/);
   assert.throws(() => verifySignedEvidence({ ...args, evidence: { ...evidence, report: { tests: [{ command: "npm test", exit_code: 1 }] } } }), /invalid executor evidence signature/);
 });
+
+
+test("governance evidence must bind an independent artifact inventory and test command", () => {
+  const keys = generateKeyPairSync("ed25519");
+  const publicKeyPem = keys.publicKey.export({ type: "spki", format: "pem" });
+  const evidence = {
+    schema: "grokbot.swarm-evidence/v1",
+    job_id: "job-governance-1",
+    role: "governance",
+    executor: "spiffe://prod/agent/grok-bot",
+    run_id: "run-governance-1",
+    status: "succeeded",
+    started_at: new Date().toISOString(),
+    completed_at: new Date(Date.now() + 5).toISOString(),
+    answer_digest: `sha256:${"b".repeat(64)}`,
+    tool_results: [{ tool: "terminal", ok: true, exitCode: 0, stdout_sha256: null, stderr_sha256: null }],
+    report: {
+      decision: "approve",
+      artifact_inventory: [{ path: "src/fix.js", sha256: `sha256:${"a".repeat(64)}` }],
+      test_commands: [{ command: "npm test", exit_code: 0 }],
+      checks: [{ name: "review", passed: true }],
+    },
+  };
+  const args = {
+    evidence,
+    signature: sign(null, Buffer.from(canonicalJson(evidence)), keys.privateKey).toString("base64"),
+    publicKeyPem,
+    expectedJobId: "job-governance-1",
+    expectedRole: "governance",
+    expectedExecutor: "spiffe://prod/agent/grok-bot",
+  };
+  assert.equal(verifySignedEvidence(args), true);
+
+  const missingInventory = { ...evidence, report: { ...evidence.report, artifact_inventory: undefined } };
+  delete missingInventory.report.artifact_inventory;
+  const missingInventoryArgs = {
+    ...args,
+    evidence: missingInventory,
+    signature: sign(null, Buffer.from(canonicalJson(missingInventory)), keys.privateKey).toString("base64"),
+  };
+  assert.throws(() => verifySignedEvidence(missingInventoryArgs), /role-specific evidence report/);
+
+  const missingTests = { ...evidence, report: { ...evidence.report, test_commands: [] } };
+  const missingTestsArgs = {
+    ...args,
+    evidence: missingTests,
+    signature: sign(null, Buffer.from(canonicalJson(missingTests)), keys.privateKey).toString("base64"),
+  };
+  assert.throws(() => verifySignedEvidence(missingTestsArgs), /role-specific evidence report/);
+});
