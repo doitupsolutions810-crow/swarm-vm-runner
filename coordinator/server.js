@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { authorizeAndEnqueue } from "./integration-adapter.js";
-import { digestJson, verifySignedReceipt } from "./integration-contract.js";
+import { digestJson, verifySignedReceipt, verifySignedEvidence } from "./integration-contract.js";
 
 const PORT = Number(process.env.PORT || 4100);
 const TENANT = process.env.SWARM_TENANT || "control12";
@@ -106,6 +106,8 @@ export function createServer({
   avroneIssuerPublicKeyPem = loadSecret(process.env.SWARM_AVRONE_ISSUER_PUBLIC_KEY_PEM, process.env.SWARM_AVRONE_ISSUER_PUBLIC_KEY_FILE),
   capabilityAuthorityPublicKeyB64 = process.env.SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64 || "",
   swarmReceiptPrivateKeyPem = loadSecret(process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_PEM, process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE),
+  executorPublicKeyPem = loadSecret(process.env.SWARM_EXECUTOR_PUBLIC_KEY_PEM, process.env.SWARM_EXECUTOR_PUBLIC_KEY_FILE),
+  executorId = process.env.SWARM_EXECUTOR_ID || "",
   avroneIssuer = process.env.SWARM_AVRONE_ISSUER || "",
   swarmAudience = process.env.SWARM_SERVICE_IDENTITY || "",
   capabilityAuthorityIssuer = process.env.SWARM_CAPABILITY_AUTHORITY_ISSUER || "spiffe://prod/broker",
@@ -351,6 +353,21 @@ export function createServer({
       }
       if (req.method === "POST" && url.pathname === "/api/events") {
         const payload = req.swarmPayload || await readJson(req);
+        if (!executorPublicKeyPem || !executorId) return json(res, 503, { error: "pinned Grok Bot evidence verification key is not configured" });
+        try {
+          verifySignedEvidence({
+            evidence: payload.evidence,
+            signature: payload.evidence_signature,
+            publicKeyPem: executorPublicKeyPem,
+            expectedJobId: payload.jobId,
+            expectedRole: payload.role,
+            expectedExecutor: executorId,
+          });
+        } catch (error) {
+          return json(res, 403, { error: "invalid signed specialist execution evidence" });
+        }
+        const expectedStatus = payload.evidence.status === "succeeded" ? "passed" : "failed";
+        if (payload.status !== expectedStatus) return json(res, 409, { error: "event status does not match signed execution evidence" });
         const outcome = await serializeMutation(async () => {
           const job = jobs.get(payload.jobId);
           if (!job) return { status: 404, body: { error: "unknown job" } };
@@ -361,7 +378,14 @@ export function createServer({
           if (job.events.some((event) => event.role === payload.role)) return { status: 409, body: { error: "role already reported" } };
           const next = structuredClone(job);
           const note = typeof payload.note === "string" ? payload.note.slice(0, 500) : "";
-          next.events.push({ role: payload.role, status: payload.status, note, at: new Date().toISOString() });
+          next.events.push({
+            role: payload.role,
+            status: payload.status,
+            note,
+            evidence: payload.evidence,
+            evidence_signature: payload.evidence_signature,
+            at: new Date().toISOString(),
+          });
           if (payload.status === "failed") next.status = "failed";
           else if (next.step < ROLES.length - 1) {
             next.step += 1;
