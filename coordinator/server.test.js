@@ -479,6 +479,27 @@ test("external executor can validate only the current active specialist claim", 
   assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body: validBody, token: ROLE_TOKENS.coder })).status, 401);
 });
 
+test("external executor claim validation rejects an expired lease", async () => {
+  let clock = 200000;
+  const isolated = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, fs.mkdtempSync(path.join(os.tmpdir(), "swarm-validate-expired-")), 500, { now: () => clock });
+  const previous = base;
+  base = isolated.base;
+  try {
+    const job = await createJob("validate expired claim");
+    const claim = await request("/api/worker/debugger/claim", {
+      method: "POST", body: { workerId: "worker-a", leaseMs: 1000 }, token: ROLE_TOKENS.debugger,
+    });
+    assert.equal(claim.status, 200);
+    const body = { jobId: job.id, workerId: "worker-a", claimToken: claim.body.claimToken };
+    assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body, token: ROLE_TOKENS.debugger })).status, 200);
+    clock += 1001;
+    assert.equal((await request("/api/worker/debugger/validate", { method: "POST", body, token: ROLE_TOKENS.debugger })).status, 409);
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+  }
+});
+
 test("claim lease can be renewed and rejects mismatched identity or token", async () => {
   const job = await createJob("renew lease");
   const claim = await request("/api/worker/debugger/claim", { method: "POST", body: { workerId: "worker-a" }, token: ROLE_TOKENS.debugger });
