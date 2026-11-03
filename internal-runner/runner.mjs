@@ -267,6 +267,7 @@ export function createInternalRunner({
       }
     })();
     return {
+      controller: heartbeatController,
       signal: heartbeatController.signal,
       promise,
       stop: () => heartbeatController.abort(),
