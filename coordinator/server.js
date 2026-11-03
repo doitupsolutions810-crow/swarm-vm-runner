@@ -72,6 +72,12 @@ function validObjective(value) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_OBJECTIVE;
 }
 
+function validCredentialSet(token, readToken, runnerToken, roleTokens) {
+  const values = [token, readToken, runnerToken, ...ROLES.map((role) => roleTokens?.[role])];
+  return values.every((value) => typeof value === "string" && value.length >= 32)
+    && new Set(values).size === values.length;
+}
+
 export function createServer({
   token = process.env.SWARM_API_TOKEN,
   readToken = process.env.SWARM_READ_TOKEN,
@@ -106,6 +112,9 @@ export function createServer({
         return json(res, 200, { ok: true, tenant, jobs: jobs.size, runnerJobs: runnerJobs.size, runnerQueued: runnerQueue.length, roles: ROLES, redis: redis.ok });
       }
       if (url.pathname.startsWith("/api/")) {
+        if (!validCredentialSet(token, readToken, runnerToken, roleTokens)) {
+          return json(res, 503, { error: "seven distinct coordinator credentials of at least 32 characters are required" });
+        }
         if (req.method === "POST" && url.pathname === "/api/events") {
           const payload = await readJson(req);
           if (!ROLES.includes(payload.role)) return json(res, 400, { error: "unknown worker role" });
