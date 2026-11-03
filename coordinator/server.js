@@ -94,6 +94,7 @@ export function createServer({
   },
   tenant = TENANT,
   stateDir = process.env.SWARM_STATE_DIR || "/var/swarm",
+  compactAfterRecords = Number(process.env.SWARM_COMPACT_AFTER_RECORDS || 500),
 } = {}) {
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const journalPath = path.join(stateDir, "coordinator.jsonl");
@@ -104,6 +105,9 @@ export function createServer({
   let runSeq = 1;
   let persistQueue = Promise.resolve();
   let stateMutationQueue = Promise.resolve();
+  let journalRecords = 0;
+  const compactPath = journalPath + ".compact.tmp";
+  try { fs.unlinkSync(compactPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
 
   function repairJournalTail() {
     if (!fs.existsSync(journalPath)) return;
@@ -132,6 +136,7 @@ export function createServer({
       } else {
         throw new Error("coordinator journal contains an unknown record");
       }
+      journalRecords += 1;
     }
   }
   for (const job of runnerJobs.values()) {
@@ -144,6 +149,7 @@ export function createServer({
       delete job.leaseExpiresAt;
       runnerQueue.push(job.id);
       fs.appendFileSync(journalPath, JSON.stringify({ type: "runner-job", job }) + "\n", { mode: 0o600 });
+      journalRecords += 1;
     }
   }
 
@@ -151,6 +157,30 @@ export function createServer({
     const operation = stateMutationQueue.then(operationFn);
     stateMutationQueue = operation.catch(() => {});
     return operation;
+  }
+
+  async function compactJournal(currentRecord) {
+    const jobSnapshot = new Map(jobs);
+    const runnerSnapshot = new Map(runnerJobs);
+    if (currentRecord.type === "job") jobSnapshot.set(currentRecord.job.id, currentRecord.job);
+    else if (currentRecord.type === "runner-job") runnerSnapshot.set(currentRecord.job.id, currentRecord.job);
+    const snapshot = [
+      ...[...jobSnapshot.values()].map((job) => ({ type: "job", job })),
+      ...[...runnerSnapshot.values()].map((job) => ({ type: "runner-job", job })),
+    ];
+    const handle = await fs.promises.open(compactPath, "w", 0o600);
+    try {
+      if (snapshot.length) await handle.writeFile(snapshot.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.promises.rename(compactPath, journalPath);
+    try {
+      const dir = await fs.promises.open(stateDir, "r");
+      try { await dir.sync(); } finally { await dir.close(); }
+    } catch { /* Directory fsync is not supported on every platform. */ }
+    journalRecords = snapshot.length;
   }
 
   function persist(record) {
@@ -162,6 +192,10 @@ export function createServer({
         await handle.sync();
       } finally {
         await handle.close();
+      }
+      journalRecords += 1;
+      if (Number.isInteger(compactAfterRecords) && compactAfterRecords > 0 && journalRecords >= compactAfterRecords) {
+        try { await compactJournal(record); } catch { /* Keep the durable append if compaction fails. */ }
       }
     });
     persistQueue = operation.catch(() => {});
