@@ -10,8 +10,8 @@ let server;
 let base;
 let state;
 
-async function start(token = TOKEN, roleTokens = ROLE_TOKENS) {
-  const instance = createServer({ token, readToken: READ_TOKEN, runnerToken: RUNNER_TOKEN, roleTokens, tenant: "test-tenant" });
+async function start(token = TOKEN, roleTokens = ROLE_TOKENS, readToken = READ_TOKEN, runnerToken = RUNNER_TOKEN) {
+  const instance = createServer({ token, readToken, runnerToken, roleTokens, tenant: "test-tenant" });
   await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
   return { instance, base: `http://127.0.0.1:${instance.address().port}` };
 }
@@ -72,6 +72,19 @@ test("protected API fails closed when coordinator token is not configured", asyn
   }
 });
 
+test("reused secrets fail closed instead of silently collapsing capabilities", async () => {
+  const reusedRoles = Object.fromEntries(["debugger", "coder", "tester", "governance"].map((role) => [role, TOKEN]));
+  const isolated = await start(TOKEN, reusedRoles, TOKEN, TOKEN);
+  const previous = base;
+  base = isolated.base;
+  try {
+    assert.equal((await request("/api/jobs", { token: TOKEN })).status, 503);
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+  }
+});
+
 test("read, coordinator, runner and role credentials are isolated by capability", async () => {
   assert.equal((await request("/api/jobs", { token: TOKEN })).status, 401);
   assert.equal((await request("/api/jobs", { method: "POST", body: { objective: "no" }, token: READ_TOKEN })).status, 401);
@@ -107,8 +120,7 @@ test("worker event routes fail closed when a role credential is missing", async 
   const previous = base;
   base = isolated.base;
   try {
-    const job = await createJob();
-    const response = await request("/api/events", { method: "POST", body: { jobId: job.id, role: "debugger", status: "passed" }, token: ROLE_TOKENS.debugger });
+    const response = await request("/api/events", { method: "POST", body: { jobId: "missing", role: "debugger", status: "passed" }, token: ROLE_TOKENS.debugger });
     assert.equal(response.status, 503);
   } finally {
     base = previous;
