@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { executeRoleTask } from "./execute.js";
 
 const ROLE = process.env.ROLE || "debugger";
+const TENANT = process.env.SWARM_TENANT || "control12";
 const COORDINATOR = process.env.COORDINATOR_URL || "http://coordinator:4100";
 const EXECUTOR_URL = process.env.SWARM_EXECUTOR_URL || "http://grok-bot:3000/api/swarm/execute";
 const configuredPollMs = Number(process.env.POLL_MS || 4000);
@@ -30,6 +31,21 @@ async function tick() {
     if (res.status === 204) return;
     if (!res.ok) throw new Error("claim rejected (" + res.status + ")");
     const mine = await res.json();
+    if (typeof mine.tenant !== "string" || mine.tenant !== TENANT) {
+      console.error(ROLE, mine.id, "claimed job tenant does not match worker configuration; releasing claim");
+      try {
+        const released = await fetch(COORDINATOR + "/api/worker/" + ROLE + "/release", {
+          method: "POST",
+          headers: { authorization: "Bearer " + ROLE_TOKEN, "content-type": "application/json" },
+          body: JSON.stringify({ jobId: mine.id, tenant: mine.tenant, workerId: WORKER_ID, claimToken: mine.claimToken }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!released.ok) console.error(ROLE, mine.id, "tenant-mismatch claim release failed (" + released.status + ")");
+      } catch (error) {
+        console.error(ROLE, mine.id, "tenant-mismatch claim release unavailable:", error.message);
+      }
+      return;
+    }
     const executionController = new AbortController();
     const heartbeat = setInterval(async () => {
       try {
