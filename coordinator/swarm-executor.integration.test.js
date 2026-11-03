@@ -121,6 +121,62 @@ test("real coordinator accepts Grok Bot signed evidence and advances the special
   assert.equal(state.jobs[0].events[0].evidence_signature, expectedEvidence.evidence_signature);
 });
 
+test("full signed four-role worker run completes through the coordinator HTTP boundary", async (t) => {
+  const coordinator = await startCoordinator();
+  const evidenceByRole = [];
+  const grok = await startGrokMock((body) => {
+    const signed = signedEvidence(body.jobId, body.role);
+    evidenceByRole.push({ role: body.role, ...signed });
+    return { status: 200, body: signed };
+  });
+  t.after(async () => {
+    await new Promise((resolve) => grok.server.close(resolve));
+    await new Promise((resolve) => coordinator.server.close(resolve));
+    rmSync(coordinator.stateDir, { recursive: true, force: true });
+  });
+
+  const created = await fetch(coordinator.url + "/api/jobs", {
+    method: "POST",
+    headers: { authorization: "Bearer " + tokens.coordinator, "content-type": "application/json" },
+    body: JSON.stringify({ objective: "run all four signed specialist roles" }),
+  });
+  assert.equal(created.status, 202);
+  const job = await created.json();
+  const roles = ["debugger", "coder", "tester", "governance"];
+
+  for (const role of roles) {
+    const claim = await claimRole(coordinator, job, role);
+    const result = await executeRoleTask({
+      job,
+      role,
+      coordinatorUrl: coordinator.url,
+      executorUrl: grok.url,
+      readToken: tokens.read,
+      roleToken: tokens[role],
+      executorToken: tokens.executor,
+      ...claim,
+    });
+    assert.equal(result.reported, true, role + " evidence was not accepted");
+    assert.equal(result.status, "passed");
+  }
+
+  const listed = await fetch(coordinator.url + "/api/jobs", {
+    headers: { authorization: "Bearer " + tokens.read },
+  });
+  const state = await listed.json();
+  const completed = state.jobs.find((item) => item.id === job.id);
+  assert.ok(completed);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.step, 4);
+  assert.deepEqual(completed.events.map((item) => item.role), roles);
+  const coderArtifacts = completed.events[1].evidence.report.artifacts;
+  const governance = completed.events[3].evidence.report;
+  assert.deepEqual(governance.artifact_inventory, coderArtifacts);
+  assert.deepEqual(governance.test_commands, [{ command: "npm test", exit_code: 0 }]);
+  assert.equal(evidenceByRole.length, 4);
+  assert.deepEqual(evidenceByRole.map((item) => item.role), roles);
+});
+
 test("coordinator rejects tampered executor signatures and leaves job unchanged", async (t) => {
   const coordinator = await startCoordinator();
   const grok = await startGrokMock((body) => ({ status: 200, body: { ...signedEvidence(body.jobId, body.role), evidence_signature: "AAAA" } }));
