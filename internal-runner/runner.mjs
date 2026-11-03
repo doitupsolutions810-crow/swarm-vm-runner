@@ -69,7 +69,7 @@ async function runAllowlisted(job) {
   if (kind === "inventory") return { ok: true, note: `${NAME} cwd=${process.cwd()} pid=${process.pid}` };
   if (kind === "search") return search(job);
   if (kind === "spawn-subagent") return spawnSubagent(job);
-  return { ok: true, note: `${NAME} prove-success allowlisted` };
+  return { ok: false, note: "no verifiable proof adapter is configured; refusing to report success" };
 }
 async function tick() {
   const job = await claim();
