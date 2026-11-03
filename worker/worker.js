@@ -17,7 +17,7 @@ async function tick() {
   if (busy) return;
   busy = true;
   try {
-    const res = await fetch(COORDINATOR + "/api/jobs", { headers: { authorization: "Bearer " + TOKEN } });
+    const res = await fetch(COORDINATOR + "/api/jobs", { headers: { authorization: "Bearer " + TOKEN }, signal: AbortSignal.timeout(10_000) });
     if (!res.ok) return;
     const body = await res.json();
     const mine = (body.jobs || []).find((job) => job.status !== "completed" && job.status !== "failed" && job.chain?.[job.step] === ROLE);
