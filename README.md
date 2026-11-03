@@ -29,7 +29,7 @@ complete internal-runner jobs, and each worker event requires its own role token
 `SWARM_GOVERNANCE_TOKEN`. Worker containers receive only the read token and
 their own role token. Do not reuse secrets across capabilities.
 
-Generate five independent values and place them in the local `.env` file:
+Generate seven independent values and place them in the local `.env` file:
 
 ```bash
 for name in SWARM_API_TOKEN SWARM_READ_TOKEN SWARM_RUNNER_TOKEN SWARM_DEBUGGER_TOKEN SWARM_CODER_TOKEN SWARM_TESTER_TOKEN SWARM_GOVERNANCE_TOKEN; do
