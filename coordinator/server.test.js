@@ -280,6 +280,30 @@ test("journal recovery ignores only an incomplete final append", async () => {
   }
 });
 
+test("a live append repairs a torn journal tail before writing the next record", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-live-tail-"));
+  const previous = base;
+  const instance = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+  base = instance.base;
+  try {
+    const first = await createJob("before torn tail");
+    fs.appendFileSync(path.join(stateDir, "coordinator.jsonl"), "{partial-live-write");
+    const second = await createJob("after torn tail");
+    assert.equal(first.id, "job-1");
+    assert.equal(second.id, "job-2");
+    await stop(instance.instance, { removeState: false });
+    const restarted = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+    base = restarted.base;
+    const restored = (await request("/api/jobs")).body.jobs;
+    assert.equal(restored.length, 2);
+    assert.ok(restored.some((item) => item.objective === "after torn tail"));
+    await stop(restarted.instance);
+  } finally {
+    base = previous;
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("runner jobs are allowlisted and claims are single-owner", async () => {
   assert.equal((await request("/api/runner/jobs", { method: "POST", body: { kind: "shell", objective: "bad" } })).status, 400);
   const queued = await request("/api/runner/jobs", { method: "POST", body: { kind: "health-probe", objective: "check" } });
