@@ -278,7 +278,7 @@ export function createServer({
           return json(res, 503, { error: "signed integration trust roots and receipt signing key are not configured" });
         }
         const payload = await readJson(req);
-        const action = payload.action;
+        const action = payload.payload?.action;
         const actionKey = action && String(action.type) + ":" + String(action.resource) + ":" + String(action.method);
         const outcome = await serializeMutation(async () => {
           const existingMessage = integrationMessages.get(payload.envelope?.message_id);
