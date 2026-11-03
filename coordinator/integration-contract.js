@@ -168,7 +168,13 @@ export function verifySignedEvidence({ evidence, signature, publicKeyPem, expect
         : expectedRole === "tester"
           ? Array.isArray(report.tests) && report.tests.length > 0 && report.tests.every(item => validText(item.command) && item.exit_code === 0)
           : expectedRole === "governance"
-            ? report.decision === "approve" && Array.isArray(report.checks) && report.checks.length > 0 && report.checks.every(item => item.passed === true)
+            ? report.decision === "approve"
+              && Array.isArray(report.checks) && report.checks.length > 0 && report.checks.every(item => item.passed === true)
+              && Array.isArray(report.artifact_inventory) && report.artifact_inventory.length > 0
+              && report.artifact_inventory.every(item => isPlainObject(item) && validText(item.path) && DIGEST.test(item.sha256 || ""))
+              && Array.isArray(report.test_commands) && report.test_commands.length > 0
+              && report.test_commands.every(item => isPlainObject(item) && validText(item.command) && Number.isInteger(item.exit_code))
+              && report.test_commands.some(item => item.exit_code === 0)
             : false;
     if (!reportOk) throw new Error("role-specific evidence report is incomplete");
   }
