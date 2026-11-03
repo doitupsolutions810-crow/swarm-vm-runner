@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { canonicalJson, digestJson, verifyEnvelope, verifyCapability, createSignedReceipt, verifySignedReceipt } from "./integration-contract.js";
+import { canonicalJson, digestJson, verifyEnvelope, verifyCapability, createSignedReceipt, verifySignedReceipt, verifySignedEvidence } from "./integration-contract.js";
 
 const issuerKeys = generateKeyPairSync("ed25519");
 const capabilityKeys = generateKeyPairSync("ed25519");
@@ -98,4 +98,28 @@ test("creates signed receipt and detects tampering and schema drift", () => {
   assert.throws(() => createSignedReceipt({ fields: receiptFields({ previous_receipt_digest: "bad" }), privateKeyPem }), /invalid previous receipt digest/);
   assert.throws(() => createSignedReceipt({ fields: receiptFields({ method: "delete" }), privateKeyPem }), /method must be uppercase/);
   assert.throws(() => verifySignedReceipt({ receipt: { ...receipt, unrecognized: true }, publicKeyPem }), /fields do not match/);
+});
+
+
+test("verifies Grok Bot signed role evidence and rejects identity or report tampering", () => {
+  const keys = generateKeyPairSync("ed25519");
+  const publicKeyPem = keys.publicKey.export({ type: "spki", format: "pem" });
+  const evidence = {
+    schema: "grokbot.swarm-evidence/v1",
+    job_id: "job-77",
+    role: "tester",
+    executor: "spiffe://prod/agent/grok-bot",
+    run_id: "swarm-job-77-tester",
+    status: "succeeded",
+    started_at: new Date().toISOString(),
+    completed_at: new Date(Date.now() + 5).toISOString(),
+    answer_digest: `sha256:${"b".repeat(64)}`,
+    tool_results: [{ tool: "terminal", ok: true, exitCode: 0, stdout_sha256: null, stderr_sha256: null }],
+    report: { tests: [{ command: "npm test", exit_code: 0 }] },
+  };
+  const signature = sign(null, Buffer.from(canonicalJson(evidence)), keys.privateKey).toString("base64");
+  const args = { evidence, signature, publicKeyPem, expectedJobId: "job-77", expectedRole: "tester", expectedExecutor: "spiffe://prod/agent/grok-bot" };
+  assert.equal(verifySignedEvidence(args), true);
+  assert.throws(() => verifySignedEvidence({ ...args, expectedJobId: "job-78" }), /identity mismatch/);
+  assert.throws(() => verifySignedEvidence({ ...args, evidence: { ...evidence, report: { tests: [{ command: "npm test", exit_code: 1 }] } } }), /invalid executor evidence signature/);
 });
