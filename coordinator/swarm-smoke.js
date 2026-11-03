@@ -1,23 +1,33 @@
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { verifySignedEvidence } from "./integration-contract.js";
 
 export const SWARM_ROLES = ["debugger", "coder", "tester", "governance"];
 
-export function buildSmokeObjective(jobId, repository, branch = "") {
-  if (typeof jobId !== "string" || !/^job-[A-Za-z0-9_.:-]{1,120}$/.test(jobId)) throw new TypeError("invalid smoke job ID");
+export function buildSmokeObjective(runTag, repository, branch = "") {
+  if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
   if (typeof repository !== "string" || !/^https:\/\//.test(repository)) throw new TypeError("SWARM_SMOKE_REPOSITORY must be an HTTPS Git URL");
-  const suffix = jobId.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const suffix = runTag.replace(/[^a-zA-Z0-9_-]/g, "-");
   const txt = `swarm-smoke-${suffix}.txt`;
   const spec = `swarm-smoke-${suffix}.test.js`;
+  const expectedContent = "swarm execution verified for " + suffix;
+  const testSource = [
+    'import test from "node:test";',
+    'import assert from "node:assert/strict";',
+    'import { readFile } from "node:fs/promises";',
+    `test("swarm smoke artifact matches the expected content", async () => {`,
+    `  assert.equal(await readFile("${txt}", "utf8"), "${expectedContent}");`,
+    "});"
+  ].join("\n");
   const branchText = branch ? `The configured checkout branch is ${branch}. Do not switch branches.` : "Use the configured checkout branch.";
   return [
     "REAL FOUR-ROLE SWARM ACCEPTANCE TASK.",
     `Target repository: ${repository}`,
     branchText,
     "Work only inside the existing per-job workspace checkout. Do not commit, push, publish, or modify existing project files.",
-    `Create ${txt} with exactly this one line: swarm execution verified for ${jobId}`,
-    `Create ${spec} using only node:test and node:assert/strict. It must read ${txt} and assert the exact expected content.`,
+    `Create ${txt} with exactly this one line: ${expectedContent}`,
+    `Create ${spec} with exactly this source:\n${testSource}`,
     `The test must run with: node --test ${spec}`,
     "Debugger: inspect the checkout and report the repository state and the planned non-destructive test.",
     "Coder: create only the two named smoke files and run the exact node --test command.",
@@ -99,16 +109,33 @@ export async function runSwarmSmoke({ env = process.env, fetchImpl = fetch, slee
   if ([coordinatorToken, readToken, tenant, executorId, publicKeyPath, repository].some(value => !value)) {
     throw new Error("configure SWARM_TOKEN, SWARM_READ_TOKEN, SWARM_TENANT, SWARM_EXECUTOR_ID, SWARM_EXECUTOR_PUBLIC_KEY_FILE, and SWARM_SMOKE_REPOSITORY");
   }
+  const timeoutMs = Math.max(60000, Math.min(3600000, Number(env.SWARM_SMOKE_TIMEOUT_MS || 900000)));
+  const pollMs = Math.max(500, Math.min(15000, Number(env.SWARM_SMOKE_POLL_MS || 2000)));
   const publicKeyPem = readFileSync(publicKeyPath, "utf8");
+  const runTag = "smoke-" + randomUUID();
+  const objective = buildSmokeObjective(runTag, repository, branch);
   const created = await requestJson(fetchImpl, baseUrl + "/api/jobs", coordinatorToken, {
     method: "POST",
-    body: JSON.stringify({ objective: "placeholder" })
+    body: JSON.stringify({ objective })
   });
   if (typeof created.id !== "string") throw new Error("coordinator did not return a job ID");
-  const objective = buildSmokeObjective(created.id, repository, branch);
-  // Replace the placeholder objective with a new job so the task objective is immutable.
-  // The placeholder is intentionally not executed; this endpoint has no update operation.
-  throw new Error("internal smoke script error: objective must be supplied when the job is created");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const snapshot = await requestJson(fetchImpl, baseUrl + "/api/jobs", readToken);
+    const job = snapshot.jobs?.find(item => item.id === created.id);
+    if (!job) throw new Error("smoke job disappeared from coordinator queue");
+    if (job.status === "completed") {
+      return validateCompletedJob(job, {
+        expectedJobId: created.id, expectedTenant: tenant, expectedExecutor: executorId, publicKeyPem
+      });
+    }
+    if (job.status === "failed") {
+      const details = (job.events || []).map(event => event.role + ":" + event.status + ":" + (event.note || "")).join(" | ");
+      throw new Error("four-role smoke job failed: " + details);
+    }
+    await sleep(pollMs);
+  }
+  throw new Error("four-role smoke job timed out after " + timeoutMs + "ms; inspect coordinator events and worker logs");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
