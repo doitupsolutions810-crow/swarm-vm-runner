@@ -60,3 +60,69 @@ test("executor and coordinator requests have finite abort deadlines", async () =
   assert.ok(signals.every(signal => signal instanceof AbortSignal));
   assert.ok(signals.every(signal => signal.aborted === false));
 });
+
+test("non-JSON executor responses remain pending", async () => {
+  let calls = 0;
+  const out = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok", ...tokens, fetchImpl: async () => {
+    calls += 1;
+    return { status: 200, json: async () => { throw new SyntaxError("invalid json"); } };
+  } });
+  assert.equal(out.pending, true);
+  assert.equal(calls, 1);
+});
+
+test("HTTP status and signed evidence outcome must agree", async () => {
+  let calls = 0;
+  const failed = { evidence: { ...good.evidence, status: "failed" }, evidence_signature: "signature" };
+  const out = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok", ...tokens, fetchImpl: async () => {
+    calls += 1;
+    return { status: 200, json: async () => failed };
+  } });
+  assert.equal(out.pending, true);
+  assert.equal(calls, 1);
+});
+
+test("coordinator rejection and ambiguous transport never mark the event reported", async () => {
+  let calls = 0;
+  const rejected = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok", ...tokens, fetchImpl: async () => {
+    calls += 1;
+    return calls === 1 ? { status: 200, json: async () => good } : { ok: false, status: 403 };
+  } });
+  assert.equal(rejected.reported, false);
+  assert.equal(rejected.pending, true);
+  calls = 0;
+  const unknown = await executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok", ...tokens, fetchImpl: async () => {
+    calls += 1;
+    if (calls === 1) return { status: 200, json: async () => good };
+    throw new Error("connection reset after send");
+  } });
+  assert.equal(unknown.reported, false);
+  assert.equal(unknown.pending, true);
+});
+
+test("retries after an ambiguous coordinator report reuse the same executor evidence", async () => {
+  const submitted = [];
+  let cycle = 0;
+  const fetchImpl = async (_url, opts) => {
+    if (opts.headers.authorization === "Bearer " + tokens.executorToken) {
+      return { status: 200, json: async () => good };
+    }
+    submitted.push(JSON.parse(opts.body));
+    cycle += 1;
+    if (cycle === 1) throw new Error("response lost");
+    return { ok: true, status: 200 };
+  };
+  const args = { job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok", ...tokens, fetchImpl };
+  const first = await executeRoleTask(args);
+  const second = await executeRoleTask(args);
+  assert.equal(first.pending, true);
+  assert.equal(second.reported, true);
+  assert.deepEqual(submitted[0].evidence, submitted[1].evidence);
+  assert.equal(submitted[0].evidence_signature, submitted[1].evidence_signature);
+});
+
+test("short credentials are rejected before any network call", async () => {
+  let calls = 0;
+  await assert.rejects(() => executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok", readToken: "short", roleToken: tokens.roleToken, executorToken: tokens.executorToken, fetchImpl: async () => { calls += 1; } }), /at least 32 characters/);
+  assert.equal(calls, 0);
+});
