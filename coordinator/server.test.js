@@ -12,8 +12,8 @@ let server;
 let base;
 let state;
 
-async function start(token = TOKEN, roleTokens = ROLE_TOKENS, readToken = READ_TOKEN, runnerToken = RUNNER_TOKEN, stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-test-"))) {
-  const instance = createServer({ token, readToken, runnerToken, roleTokens, tenant: "test-tenant", stateDir });
+async function start(token = TOKEN, roleTokens = ROLE_TOKENS, readToken = READ_TOKEN, runnerToken = RUNNER_TOKEN, stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-test-")), compactAfterRecords = 500) {
+  const instance = createServer({ token, readToken, runnerToken, roleTokens, tenant: "test-tenant", stateDir, compactAfterRecords });
   await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
   return { instance, base: `http://127.0.0.1:${instance.address().port}`, stateDir };
 }
@@ -298,6 +298,31 @@ test("a live append repairs a torn journal tail before writing the next record",
     assert.equal(restored.length, 2);
     assert.ok(restored.some((item) => item.objective === "after torn tail"));
     await stop(restarted.instance);
+  } finally {
+    base = previous;
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("journal compaction preserves latest job and runner state across restart", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-compact-"));
+  const previous = base;
+  const first = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir, 3);
+  base = first.base;
+  try {
+    const job = await createJob("compact state");
+    await event("debugger", { jobId: job.id, status: "passed", note: "before compact" });
+    const queued = await request("/api/runner/jobs", { method: "POST", body: { kind: "inventory", objective: "compact runner" } });
+    const runner = (await request("/api/runner/claim", { method: "POST", body: { runner: "worker-c" } })).body;
+    assert.equal(runner.id, queued.body.id);
+    await stop(first.instance, { removeState: false });
+    const second = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir, 3);
+    base = second.base;
+    const restored = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
+    assert.equal(restored.events.length, 1);
+    const restoredRunner = (await request("/api/runner/jobs", { method: "GET" })).body.jobs.find((item) => item.id === runner.id);
+    assert.equal(restoredRunner.status, "queued");
+    await stop(second.instance);
   } finally {
     base = previous;
     fs.rmSync(stateDir, { recursive: true, force: true });
