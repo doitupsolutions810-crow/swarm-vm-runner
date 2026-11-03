@@ -126,8 +126,8 @@ test("coordinator rejects tampered executor signatures and leaves job unchanged"
   });
   const created = await fetch(coordinator.url + "/api/jobs", { method: "POST", headers: { authorization: "Bearer " + tokens.coordinator, "content-type": "application/json" }, body: JSON.stringify({ objective: "reject forged evidence" }) });
   const job = await created.json();
-  const claimToken = await claimRole(coordinator, job, "debugger");
-  const result = await executeRoleTask({ job, role: "debugger", coordinatorUrl: coordinator.url, executorUrl: grok.url, readToken: tokens.read, roleToken: tokens.debugger, executorToken: tokens.executor, claimToken });
+  const claim = await claimRole(coordinator, job, "debugger");
+  const result = await executeRoleTask({ job, role: "debugger", coordinatorUrl: coordinator.url, executorUrl: grok.url, readToken: tokens.read, roleToken: tokens.debugger, executorToken: tokens.executor, ...claim });
   assert.equal(result.reported, false);
   const listed = await fetch(coordinator.url + "/api/jobs", { headers: { authorization: "Bearer " + tokens.read } });
   const state = await listed.json();
