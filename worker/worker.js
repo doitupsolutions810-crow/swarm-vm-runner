@@ -1,9 +1,11 @@
 const ROLE = process.env.ROLE || "debugger";
 const COORDINATOR = process.env.COORDINATOR_URL || "http://coordinator:4100";
 const POLL_MS = 4000;
+const TOKEN = process.env.SWARM_API_TOKEN || "";
+if (TOKEN.length < 32) throw new Error("SWARM_API_TOKEN must be at least 32 characters");
 
 async function tick() {
-  const res = await fetch(`${COORDINATOR}/api/jobs`);
+  const res = await fetch(`${COORDINATOR}/api/jobs`, { headers: { authorization: `Bearer ${TOKEN}` } });
   if (!res.ok) return;
   const { jobs } = await res.json();
   const mine = (jobs || []).find(
@@ -13,7 +15,7 @@ async function tick() {
   const note = `${ROLE} accepted ${mine.id} (no in-process eval)`;
   await fetch(`${COORDINATOR}/api/events`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({ jobId: mine.id, role: ROLE, status: "passed", note }),
   });
   console.log(note);
