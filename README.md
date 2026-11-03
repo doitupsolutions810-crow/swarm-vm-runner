@@ -22,8 +22,8 @@ docker compose --profile runner --profile content up --build
 
 The coordinator keeps `/health` public for container health checks. Every `/api/*`
 route requires a bearer token with a narrow purpose: `SWARM_API_TOKEN` may create
-jobs, `SWARM_READ_TOKEN` may read jobs/search, `SWARM_RUNNER_TOKEN` may claim and
-complete internal-runner jobs, and each worker event requires its own role token:
+jobs, `SWARM_READ_TOKEN` may read jobs/search, `SWARM_RUNNER_TOKEN` may claim,
+renew, and complete internal-runner jobs, and each worker event requires its own role token:
 `SWARM_DEBUGGER_TOKEN`, `SWARM_CODER_TOKEN`, `SWARM_TESTER_TOKEN`, or
 `SWARM_GOVERNANCE_TOKEN`. Worker containers receive only the read token and
 their own role token. Do not reuse secrets across capabilities.
@@ -39,8 +39,21 @@ done
 The coordinator persists job and runner state to an fsync-backed JSONL journal on the mounted `swarm-data` volume, compacts it after 500 records by default, recovers queued work after restart, and rejects stale runner claim tokens. It rejects oversized or malformed request bodies, enforces the
 debugger → coder → tester → governance transition order, rejects duplicate or
 terminal-state reports, and binds runner completion to the runner that claimed
-the job. These controls harden the coordinator protocol; they do not make the
-optional GitHub Actions runner safe for untrusted pull-request code.
+the job. Internal runner claims use a renewable bounded lease. The runner heartbeats
+at `RUNNER_HEARTBEAT_MS` (default 10 seconds) against a `RUNNER_LEASE_MS` (default
+30 seconds); the heartbeat must be less than half the lease duration. A failed
+renewal cancels the active task and the runner does not submit completion with a
+stale claim token. Runner polling is single-flight, so one process never claims
+multiple jobs concurrently. The `spawn-subagent` action uses a durable
+`Idempotency-Key` derived from the parent runner job ID, so replay after an
+ambiguous network outcome returns the same child job instead of creating a
+duplicate. The `/api/jobs` idempotency contract rejects reuse of a key with a
+different normalized objective and persists the key in the coordinator journal.
+
+The internal runner reads the settings `RUNNER_LEASE_MS`, `RUNNER_HEARTBEAT_MS`,
+and `POLL_MS` from the Compose environment. Keep the heartbeat safely below
+half the lease duration. These controls harden the coordinator protocol; they
+do not make the optional GitHub Actions runner safe for untrusted pull-request code.
 
 ## AVRONE signed integration boundary
 
