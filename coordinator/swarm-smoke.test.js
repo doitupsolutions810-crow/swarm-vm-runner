@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign, createHash } from "node:crypto";
 import { canonicalJson } from "./integration-contract.js";
-import { buildSmokeObjective, smokeArtifactPaths, smokeArtifactExpectations, smokeCoordinatorToken, boundedInteger, validateCompletedJob } from "./swarm-smoke.js";
+import { buildSmokeObjective, validSmokeBranch, smokeArtifactPaths, smokeArtifactExpectations, smokeCoordinatorToken, boundedInteger, validateCompletedJob } from "./swarm-smoke.js";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
@@ -61,6 +61,15 @@ test("smoke objective creates a bounded, non-destructive, executable four-role t
   assert.match(objective, /Do not commit, push, publish/);
   assert.match(objective, /Governance: independently inspect/);
   assert.ok(objective.length <= 2000);
+  assert.equal(validSmokeBranch("main"), true);
+  assert.equal(validSmokeBranch("feature/edge-hardening"), true);
+  for (const unsafe of [
+    "../escape", "/main", "main/", "main//sub", "feature/..", "foo..bar",
+    ".hidden", "main.lock", "feature/topic.lock", "trailing.", "branch with spaces",
+  ]) assert.equal(validSmokeBranch(unsafe), false, unsafe);
+  assert.equal(validSmokeBranch(""), false);
+  assert.equal(validSmokeBranch(null), false);
+  assert.throws(() => buildSmokeObjective("smoke-1", "https://github.com/example/repo.git", "../escape"), /smoke branch/);
   assert.equal(smokeCoordinatorToken({ SWARM_API_TOKEN: "compose-api-token" }), "compose-api-token");
   assert.equal(smokeCoordinatorToken({ SWARM_TOKEN: "legacy-token" }), "legacy-token");
   assert.equal(smokeCoordinatorToken({}), "");
