@@ -8,6 +8,7 @@ on:
       - "worker/**"
       - "internal-runner/**"
       - "scripts/prove-success.sh"
+      - "scripts/test-prove-success.sh"
       - "docker-compose.yml"
       - ".env.example"
       - "SUCCESS_CRITERIA.md"
