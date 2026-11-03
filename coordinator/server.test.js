@@ -422,6 +422,11 @@ test("runner status listing never exposes a live claim token", async () => {
   assert.ok(visible);
   assert.equal("claimToken" in visible, false);
   assert.equal(visible.runner, "worker-secret-owner");
+  const completed = await request("/api/runner/complete", {
+    method: "POST",
+    body: { id: claimed.body.id, runner: "worker-secret-owner", claimToken: claimed.body.claimToken, ok: true },
+  });
+  assert.equal(completed.status, 200);
 });
 
 test("expired runner lease cannot complete before reclamation and stale token stays fenced", async () => {
