@@ -56,7 +56,12 @@ function signedRoleEvidence(role, payload) {
       ? { artifacts: [{ path: "src/fix.js", sha256: `sha256:${"a".repeat(64)}` }] }
       : role === "tester"
         ? { tests: [{ command: "npm test", exit_code: 0 }] }
-        : { decision: "approve", checks: [{ name: "signed evidence", passed: true }] };
+        : {
+          decision: "approve",
+          artifact_inventory: [{ path: "src/fix.js", sha256: "sha256:" + "a".repeat(64) }],
+          test_commands: [{ command: "npm test", exit_code: 0 }],
+          checks: [{ name: "signed evidence", passed: true }],
+        };
   const evidence = {
     schema: "grokbot.swarm-evidence/v1", job_id: payload.jobId, role, executor: EXECUTOR_ID,
     run_id: `test-run-${payload.jobId}-${role}`,
