@@ -1,9 +1,9 @@
 const ROLE = process.env.ROLE || "debugger";
 const COORDINATOR = process.env.COORDINATOR_URL || "http://coordinator:4100";
 const POLL_MS = 4000;
-const TOKEN = process.env.SWARM_API_TOKEN || "";
+const TOKEN = process.env.SWARM_READ_TOKEN || "";
 const ROLE_TOKEN = process.env.SWARM_ROLE_TOKEN || "";
-if (TOKEN.length < 32) throw new Error("SWARM_API_TOKEN must be at least 32 characters");
+if (TOKEN.length < 32) throw new Error("SWARM_READ_TOKEN must be at least 32 characters");
 if (ROLE_TOKEN.length < 32) throw new Error("SWARM_ROLE_TOKEN must be at least 32 characters");
 
 async function tick() {
