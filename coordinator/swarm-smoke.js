@@ -5,12 +5,20 @@ import { verifySignedEvidence } from "./integration-contract.js";
 
 export const SWARM_ROLES = ["debugger", "coder", "tester", "governance"];
 
+export function smokeArtifactPaths(runTag) {
+  if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
+  const suffix = runTag.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return {
+    textFile: `swarm-smoke-${suffix}.txt`,
+    testFile: `swarm-smoke-${suffix}.test.js`
+  };
+}
+
 export function buildSmokeObjective(runTag, repository, branch = "") {
   if (typeof runTag !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(runTag)) throw new TypeError("invalid smoke run tag");
   if (typeof repository !== "string" || !/^https:\/\//.test(repository)) throw new TypeError("SWARM_SMOKE_REPOSITORY must be an HTTPS Git URL");
   const suffix = runTag.replace(/[^a-zA-Z0-9_-]/g, "-");
-  const txt = `swarm-smoke-${suffix}.txt`;
-  const spec = `swarm-smoke-${suffix}.test.js`;
+  const { textFile: txt, testFile: spec } = smokeArtifactPaths(runTag);
   const expectedContent = "swarm execution verified for " + suffix;
   const testSource = [
     'import test from "node:test";',
@@ -38,7 +46,7 @@ export function buildSmokeObjective(runTag, repository, branch = "") {
 }
 
 export function validateCompletedJob(job, {
-  expectedJobId, expectedTenant, expectedExecutor, publicKeyPem, nowMs = Date.now()
+  expectedJobId, expectedTenant, expectedExecutor, expectedArtifactPaths = [], expectedTestCommand = "", publicKeyPem, nowMs = Date.now()
 }) {
   if (!job || job.id !== expectedJobId || job.tenant !== expectedTenant || job.status !== "completed") {
     throw new Error("smoke job identity, tenant, or completion status mismatch");
@@ -69,11 +77,17 @@ export function validateCompletedJob(job, {
       || !coder.artifacts.every(item => typeof item.path === "string" && /^sha256:[a-f0-9]{64}$/.test(item.sha256 || ""))) {
     throw new Error("coder artifacts missing or malformed");
   }
-  if (!Array.isArray(tester.tests) || !tester.tests.length || !tester.tests.every(item => typeof item.command === "string" && item.exit_code === 0)) {
-    throw new Error("tester did not provide successful test evidence");
+  if (!expectedArtifactPaths.length || !expectedArtifactPaths.every(path => coder.artifacts.some(item => item.path === path))) {
+    throw new Error("coder did not produce both uniquely named smoke artifacts");
   }
-  if (governance.decision !== "approve" || !Array.isArray(governance.checks) || !governance.checks.length || !governance.checks.every(item => item.passed === true)) {
-    throw new Error("governance did not independently approve the evidence");
+  if (!Array.isArray(tester.tests) || !tester.tests.length || !tester.tests.every(item => typeof item.command === "string" && item.exit_code === 0)
+      || !tester.tests.some(item => item.command === expectedTestCommand)) {
+    throw new Error("tester did not provide successful smoke test evidence");
+  }
+  const requiredGovernanceChecks = ["successful terminal execution", "artifact inventory", "successful test command", "explicit governance approval"];
+  if (governance.decision !== "approve" || !Array.isArray(governance.checks)
+      || !requiredGovernanceChecks.every(name => governance.checks.some(item => item.name === name && item.passed === true))) {
+    throw new Error("governance did not independently approve all required checks");
   }
   return {
     jobId: job.id,
@@ -114,6 +128,8 @@ export async function runSwarmSmoke({ env = process.env, fetchImpl = fetch, slee
   const publicKeyPem = readFileSync(publicKeyPath, "utf8");
   const runTag = "smoke-" + randomUUID();
   const objective = buildSmokeObjective(runTag, repository, branch);
+  const expectedArtifactPaths = Object.values(smokeArtifactPaths(runTag));
+  const expectedTestCommand = "node --test " + expectedArtifactPaths[1];
   const created = await requestJson(fetchImpl, baseUrl + "/api/jobs", coordinatorToken, {
     method: "POST",
     body: JSON.stringify({ objective })
@@ -126,7 +142,8 @@ export async function runSwarmSmoke({ env = process.env, fetchImpl = fetch, slee
     if (!job) throw new Error("smoke job disappeared from coordinator queue");
     if (job.status === "completed") {
       return validateCompletedJob(job, {
-        expectedJobId: created.id, expectedTenant: tenant, expectedExecutor: executorId, publicKeyPem
+        expectedJobId: created.id, expectedTenant: tenant, expectedExecutor: executorId,
+        expectedArtifactPaths, expectedTestCommand, publicKeyPem
       });
     }
     if (job.status === "failed") {
