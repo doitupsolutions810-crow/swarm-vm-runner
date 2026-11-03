@@ -6,17 +6,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { createServer } from "./server.js";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { canonicalJson } from "./integration-contract.js";
 
 const TOKEN = "test-token-0123456789abcdef0123456789abcdef";
 const READ_TOKEN = "read-token-0123456789abcdef0123456789abcdef";
 const RUNNER_TOKEN = "runner-token-0123456789abcdef0123456789abcdef";
 const ROLE_TOKENS = Object.fromEntries(["debugger", "coder", "tester", "governance"].map((role) => [role, `role-${role}-token-0123456789abcdef`]));
+const EXECUTOR_KEYS = generateKeyPairSync("ed25519");
+const EXECUTOR_ID = "spiffe://prod/agent/grok-bot";
+const EXECUTOR_PUBLIC_KEY_PEM = EXECUTOR_KEYS.publicKey.export({ type: "spki", format: "pem" });
 let server;
 let base;
 let state;
 
-async function start(token = TOKEN, roleTokens = ROLE_TOKENS, readToken = READ_TOKEN, runnerToken = RUNNER_TOKEN, stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-test-")), compactAfterRecords = 500) {
-  const instance = createServer({ token, readToken, runnerToken, roleTokens, tenant: "test-tenant", stateDir, compactAfterRecords });
+async function start(token = TOKEN, roleTokens = ROLE_TOKENS, readToken = READ_TOKEN, runnerToken = RUNNER_TOKEN, stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-test-")), compactAfterRecords = 500, executorConfig = {}) {
+  const instance = createServer({
+    token, readToken, runnerToken, roleTokens, tenant: "test-tenant", stateDir, compactAfterRecords,
+    executorPublicKeyPem: EXECUTOR_PUBLIC_KEY_PEM, executorId: EXECUTOR_ID, ...executorConfig,
+  });
   await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
   return { instance, base: `http://127.0.0.1:${instance.address().port}`, stateDir };
 }
@@ -39,8 +47,30 @@ async function request(path, { method = "GET", body, token, contentType = "appli
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
+function signedRoleEvidence(role, payload) {
+  const started = new Date();
+  const report = role === "debugger"
+    ? { diagnosis: "reproduced in test sandbox", reproduction: "node --test fixture" }
+    : role === "coder"
+      ? { artifacts: [{ path: "src/fix.js", sha256: `sha256:${"a".repeat(64)}` }] }
+      : role === "tester"
+        ? { tests: [{ command: "npm test", exit_code: 0 }] }
+        : { decision: "approve", checks: [{ name: "signed evidence", passed: true }] };
+  const evidence = {
+    schema: "grokbot.swarm-evidence/v1", job_id: payload.jobId, role, executor: EXECUTOR_ID,
+    run_id: `test-run-${payload.jobId}-${role}`,
+    status: payload.status === "passed" ? "succeeded" : "failed",
+    started_at: started.toISOString(), completed_at: new Date(started.getTime() + 1).toISOString(),
+    answer_digest: `sha256:${"b".repeat(64)}`,
+    tool_results: payload.status === "passed" ? [{ tool: "terminal", ok: true, exitCode: 0, stdout_sha256: null, stderr_sha256: null }] : [],
+    report: payload.status === "passed" ? report : {},
+  };
+  const evidence_signature = sign(null, Buffer.from(canonicalJson(evidence)), EXECUTOR_KEYS.privateKey).toString("base64");
+  return { evidence, evidence_signature };
+}
 async function event(role, payload) {
-  return request("/api/events", { method: "POST", body: { ...payload, role }, token: ROLE_TOKENS[role] });
+  const signed = signedRoleEvidence(role, payload);
+  return request("/api/events", { method: "POST", body: { ...payload, ...signed, role }, token: ROLE_TOKENS[role] });
 }
 async function createJob(objective = "verify orchestration") {
   const response = await request("/api/jobs", { method: "POST", body: { objective } });
