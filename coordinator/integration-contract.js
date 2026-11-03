@@ -101,7 +101,7 @@ export function verifyCapability({ capability, signature, publicKeyB64, expected
   const issued = Number(capability.issued_at) * 1000;
   const expires = Number(capability.expires_at) * 1000;
   if (!Number.isFinite(issued) || !Number.isFinite(expires) || issued > nowMs + clockSkewMs || expires <= nowMs || expires <= issued || expires - issued > 300000) throw new Error("capability is expired, premature, or exceeds maximum lifetime");
-  if (!isPlainObject(action) || !["type", "resource", "method"].every((key) => validText(action[key])) || !/^[A-Z]+$/.test(action.method)) throw new Error("action must specify exact type, resource and uppercase method");
+  if (!exactKeys(action, ["type", "resource", "method"]) || !["type", "resource", "method"].every((key) => validText(action[key])) || !/^[A-Z]+$/.test(action.method)) throw new Error("action must specify exact type, resource and uppercase method");
   if (!Array.isArray(capability.rights) || !capability.rights.some((right) => isPlainObject(right) && right.type === action.type && right.resource === action.resource && right.method === action.method)) throw new Error("capability does not authorize exact action/resource/method");
   if (!isPlainObject(capability.constraints)) throw new Error("capability constraints must be an object");
   if (!verifyWithRawEd25519(capability, signature, publicKeyB64)) throw new Error("invalid capability signature");
