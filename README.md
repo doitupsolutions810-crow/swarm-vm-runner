@@ -42,6 +42,12 @@ terminal-state reports, and binds runner completion to the runner that claimed
 the job. These controls harden the coordinator protocol; they do not make the
 optional GitHub Actions runner safe for untrusted pull-request code.
 
+## AVRONE signed integration boundary
+
+The coordinator exposes `POST /api/integration/enqueue` for the first signed cross-repository action. It requires the normal coordinator bearer token **and** an RFC 8785 / Ed25519 AVRONE envelope, a separately signed Capability Authority capability for the exact `Execute:swarm.jobs:POST` right, and a mounted Swarm receipt-signing private key. It verifies issuer, audience, payload digest, expiry, capability signature and exact method before accepting a job. The job, idempotency ledger and signed receipt are persisted in one fsync-backed journal record; exact retries return the original receipt, while conflicting reuse of either identifier is rejected.
+
+Trust roots are configured with `SWARM_AVRONE_ISSUER_PUBLIC_KEY_FILE`, `SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64`, `SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE`, `SWARM_AVRONE_ISSUER`, and `SWARM_SERVICE_IDENTITY`. Key files must be mounted from an independent secret store; do not commit keys or trust keys supplied in requests. Without all trust material the integration endpoint returns 503.
+
 **Execution-adapter gap:** the four current role worker containers are still
 protocol stubs. They deliberately report `failed` instead of `passed` until a
 real task executor is configured and returns independently verifiable evidence.
