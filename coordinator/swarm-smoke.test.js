@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign, createHash } from "node:crypto";
 import { canonicalJson } from "./integration-contract.js";
-import { buildSmokeObjective, validateCompletedJob } from "./swarm-smoke.js";
+import { buildSmokeObjective, smokeArtifactPaths, validateCompletedJob } from "./swarm-smoke.js";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
@@ -38,9 +38,17 @@ function validJob() {
     id: jobId, tenant, status: "completed",
     events: [
       makeEvent("debugger", { diagnosis: "Inspected the source and found no blocker.", reproduction: "pwd && git status --short" }),
-      makeEvent("coder", { artifacts: [{ path: "swarm-smoke.txt", sha256: digest("artifact") }] }),
-      makeEvent("tester", { tests: [{ command: "node --test swarm-smoke.test.js", exit_code: 0 }] }),
-      makeEvent("governance", { decision: "approve", checks: [{ name: "artifact", passed: true }, { name: "tests", passed: true }] })
+      makeEvent("coder", { artifacts: [
+        { path: "swarm-smoke-smoke-run.txt", sha256: digest("artifact") },
+        { path: "swarm-smoke-smoke-run.test.js", sha256: digest("test artifact") }
+      ] }),
+      makeEvent("tester", { tests: [{ command: "node --test swarm-smoke-smoke-run.test.js", exit_code: 0 }] }),
+      makeEvent("governance", { decision: "approve", checks: [
+        { name: "successful terminal execution", passed: true },
+        { name: "artifact inventory", passed: true },
+        { name: "successful test command", passed: true },
+        { name: "explicit governance approval", passed: true }
+      ] })
     ]
   };
 }
@@ -48,6 +56,7 @@ function validJob() {
 test("smoke objective creates a bounded, non-destructive, executable four-role task", () => {
   const objective = buildSmokeObjective("smoke-abc123", "https://github.com/example/repo.git", "main");
   assert.match(objective, /swarm-smoke-smoke-abc123\.txt/);
+  assert.deepEqual(smokeArtifactPaths("smoke-abc123"), { textFile: "swarm-smoke-smoke-abc123.txt", testFile: "swarm-smoke-smoke-abc123.test.js" });
   assert.match(objective, /node --test swarm-smoke-smoke-abc123\.test\.js/);
   assert.match(objective, /Do not commit, push, publish/);
   assert.match(objective, /Governance: independently inspect/);
@@ -57,7 +66,9 @@ test("smoke objective creates a bounded, non-destructive, executable four-role t
 
 test("smoke verifier accepts four ordered signed events and returns a compact receipt", () => {
   const summary = validateCompletedJob(validJob(), {
-    expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor, publicKeyPem, nowMs
+    expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
+    expectedArtifactPaths: ["swarm-smoke-smoke-run.txt", "swarm-smoke-smoke-run.test.js"],
+    expectedTestCommand: "node --test swarm-smoke-smoke-run.test.js", publicKeyPem, nowMs
   });
   assert.equal(summary.status, "completed");
   assert.equal(summary.artifactCount, 1);
