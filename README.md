@@ -33,7 +33,7 @@ Generate seven independent values and place them in the local `.env` file:
 
 ```bash
 for name in SWARM_API_TOKEN SWARM_READ_TOKEN SWARM_RUNNER_TOKEN SWARM_DEBUGGER_TOKEN SWARM_CODER_TOKEN SWARM_TESTER_TOKEN SWARM_GOVERNANCE_TOKEN; do
-  printf '%s=%s\\n' "$name" "$(openssl rand -hex 32)"
+  printf '%s=%s\n' "$name" "$(openssl rand -hex 32)"
 done
 ```
 
