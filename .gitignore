@@ -2,3 +2,4 @@
 *.pem
 *.token
 node_modules/
+secrets/
