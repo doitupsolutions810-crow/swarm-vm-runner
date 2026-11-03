@@ -1,0 +1,30 @@
+name: coordinator-contracts
+
+on:
+  push:
+    branches: ["main", "security/**"]
+    paths:
+      - "coordinator/**"
+      - ".github/workflows/coordinator-contracts.yml"
+  pull_request:
+    paths:
+      - "coordinator/**"
+      - ".github/workflows/coordinator-contracts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  node-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax check
+        working-directory: coordinator
+        run: node --check server.js && node --check server.test.js
+      - name: Adversarial coordinator contracts
+        working-directory: coordinator
+        run: npm test
