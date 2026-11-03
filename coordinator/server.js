@@ -108,7 +108,11 @@ export function createServer({
   if (fs.existsSync(journalPath)) {
     const raw = fs.readFileSync(journalPath, "utf8");
     const lines = raw.split("\n");
-    if (!raw.endsWith("\n")) lines.pop();
+    if (!raw.endsWith("\n")) {
+      lines.pop();
+      const lastNewline = raw.lastIndexOf("\n");
+      fs.truncateSync(journalPath, lastNewline + 1);
+    }
     for (const line of lines) {
       if (!line) continue;
       const record = JSON.parse(line);
@@ -252,42 +256,49 @@ export function createServer({
       if (req.method === "POST" && url.pathname === "/api/runner/claim") {
         const payload = await readJson(req);
         if (typeof payload.runner !== "string" || !/^[A-Za-z0-9_.-]{1,80}$/.test(payload.runner)) return json(res, 400, { error: "valid runner name required" });
-        const now = Date.now();
-        for (const candidate of runnerJobs.values()) {
-          if (candidate.status === "running" && Number(candidate.leaseExpiresAt) <= now) {
-            const requeued = { ...candidate, status: "queued" };
-            delete requeued.runner;
-            delete requeued.claimToken;
-            delete requeued.claimedAt;
-            delete requeued.leaseExpiresAt;
-            await persist({ type: "runner-job", job: requeued });
-            runnerJobs.set(requeued.id, requeued);
-            runnerQueue.push(requeued.id);
+        const outcome = await serializeMutation(async () => {
+          const now = Date.now();
+          for (const candidate of runnerJobs.values()) {
+            if (candidate.status === "running" && Number(candidate.leaseExpiresAt) <= now) {
+              const requeued = { ...candidate, status: "queued" };
+              delete requeued.runner;
+              delete requeued.claimToken;
+              delete requeued.claimedAt;
+              delete requeued.leaseExpiresAt;
+              await persist({ type: "runner-job", job: requeued });
+              runnerJobs.set(requeued.id, requeued);
+              runnerQueue.push(requeued.id);
+            }
           }
-        }
-        const id = runnerQueue.shift();
-        if (!id) { res.writeHead(204); return res.end(); }
-        const job = runnerJobs.get(id);
-        if (!job || job.status !== "queued") return json(res, 409, { error: "queue state inconsistent" });
-        const claimed = { ...job, status: "running", runner: payload.runner, claimToken: randomUUID(), claimedAt: new Date().toISOString(), leaseExpiresAt: Date.now() + 30000 };
-        try { await persist({ type: "runner-job", job: claimed }); }
-        catch (error) { runnerQueue.unshift(id); throw error; }
-        runnerJobs.set(id, claimed);
-        return json(res, 200, claimed);
+          const id = runnerQueue.shift();
+          if (!id) return null;
+          const job = runnerJobs.get(id);
+          if (!job || job.status !== "queued") return { status: 409, body: { error: "queue state inconsistent" } };
+          const claimed = { ...job, status: "running", runner: payload.runner, claimToken: randomUUID(), claimedAt: new Date().toISOString(), leaseExpiresAt: Date.now() + 30000 };
+          try { await persist({ type: "runner-job", job: claimed }); }
+          catch (error) { runnerQueue.unshift(id); throw error; }
+          runnerJobs.set(id, claimed);
+          return { status: 200, body: claimed };
+        });
+        if (!outcome) { res.writeHead(204); return res.end(); }
+        return json(res, outcome.status, outcome.body);
       }
       if (req.method === "POST" && url.pathname === "/api/runner/complete") {
         const payload = await readJson(req);
-        const job = runnerJobs.get(payload.id);
-        if (!job) return json(res, 404, { error: "unknown runner job" });
-        if (job.status !== "running") return json(res, 409, { error: "runner job is not active" });
-        if (payload.runner !== job.runner || payload.claimToken !== job.claimToken) return json(res, 403, { error: "runner claim does not match" });
-        if (typeof payload.ok !== "boolean") return json(res, 400, { error: "ok boolean required" });
-        const completed = { ...job, status: payload.ok ? "completed" : "failed", note: typeof payload.note === "string" ? payload.note.slice(0, 500) : "", completedAt: new Date().toISOString() };
-        if (Array.isArray(payload.hits)) completed.hits = payload.hits.slice(0, 20);
-        if (payload.spawned && typeof payload.spawned === "object" && !Array.isArray(payload.spawned)) completed.spawned = payload.spawned;
-        await persist({ type: "runner-job", job: completed });
-        runnerJobs.set(job.id, completed);
-        return json(res, 200, completed);
+        const outcome = await serializeMutation(async () => {
+          const job = runnerJobs.get(payload.id);
+          if (!job) return { status: 404, body: { error: "unknown runner job" } };
+          if (job.status !== "running") return { status: 409, body: { error: "runner job is not active" } };
+          if (payload.runner !== job.runner || payload.claimToken !== job.claimToken) return { status: 403, body: { error: "runner claim does not match" } };
+          if (typeof payload.ok !== "boolean") return { status: 400, body: { error: "ok boolean required" } };
+          const completed = { ...job, status: payload.ok ? "completed" : "failed", note: typeof payload.note === "string" ? payload.note.slice(0, 500) : "", completedAt: new Date().toISOString() };
+          if (Array.isArray(payload.hits)) completed.hits = payload.hits.slice(0, 20);
+          if (payload.spawned && typeof payload.spawned === "object" && !Array.isArray(payload.spawned)) completed.spawned = payload.spawned;
+          await persist({ type: "runner-job", job: completed });
+          runnerJobs.set(job.id, completed);
+          return { status: 200, body: completed };
+        });
+        return json(res, outcome.status, outcome.body);
       }
       if (req.method === "GET" && url.pathname === "/api/search") {
         const q = (url.searchParams.get("q") || "").toLowerCase();
