@@ -12,13 +12,14 @@ let server;
 let base;
 let state;
 
-async function start(token = TOKEN, roleTokens = ROLE_TOKENS, readToken = READ_TOKEN, runnerToken = RUNNER_TOKEN) {
-  const instance = createServer({ token, readToken, runnerToken, roleTokens, tenant: "test-tenant" });
+async function start(token = TOKEN, roleTokens = ROLE_TOKENS, readToken = READ_TOKEN, runnerToken = RUNNER_TOKEN, stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-test-"))) {
+  const instance = createServer({ token, readToken, runnerToken, roleTokens, tenant: "test-tenant", stateDir });
   await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
-  return { instance, base: `http://127.0.0.1:${instance.address().port}` };
+  return { instance, base: `http://127.0.0.1:${instance.address().port}`, stateDir };
 }
-async function stop(instance) {
+async function stop(instance, { removeState = true } = {}) {
   if (instance?.listening) await new Promise((resolve, reject) => instance.close((error) => error ? reject(error) : resolve()));
+  if (removeState && instance?.stateDir) fs.rmSync(instance.stateDir, { recursive: true, force: true });
 }
 async function request(path, { method = "GET", body, token, contentType = "application/json" } = {}) {
   const headers = {};
@@ -217,6 +218,60 @@ test("stub worker reports failure instead of falsely passing unexecuted work", a
   }
 });
 
+test("job and runner state survive coordinator restart with stale claims invalidated", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-restart-"));
+  const previous = base;
+  const first = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+  base = first.base;
+  let claimed;
+  let job;
+  try {
+    job = await createJob("persist me");
+    await event("debugger", { jobId: job.id, status: "passed", note: "durable receipt" });
+    const queued = await request("/api/runner/jobs", { method: "POST", body: { kind: "inventory", objective: "resume me" } });
+    claimed = (await request("/api/runner/claim", { method: "POST", body: { runner: "worker-a" } })).body;
+    assert.equal(claimed.id, queued.body.id);
+    await stop(first.instance, { removeState: false });
+
+    const second = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+    base = second.base;
+    const restored = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
+    assert.equal(restored.status, "running");
+    assert.equal(restored.events.length, 1);
+    const requeued = (await request("/api/runner/jobs", { method: "GET" })).body.jobs.find((item) => item.id === claimed.id);
+    assert.equal(requeued.status, "queued");
+    const newClaim = (await request("/api/runner/claim", { method: "POST", body: { runner: "worker-a" } })).body;
+    assert.notEqual(newClaim.claimToken, claimed.claimToken);
+    assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: claimed.id, runner: "worker-a", claimToken: claimed.claimToken, ok: true } })).status, 403);
+    assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: newClaim.id, runner: "worker-a", claimToken: newClaim.claimToken, ok: true } })).status, 200);
+    await stop(second.instance);
+  } finally {
+    base = previous;
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("journal recovery ignores only an incomplete final append", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-coordinator-tail-"));
+  const previous = base;
+  const first = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+  base = first.base;
+  let job;
+  try {
+    job = await createJob("journal tail recovery");
+    await stop(first.instance, { removeState: false });
+    fs.appendFileSync(path.join(stateDir, "coordinator.jsonl"), "{truncated-record");
+    const second = await start(TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN, stateDir);
+    base = second.base;
+    const restored = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
+    assert.equal(restored.objective, "journal tail recovery");
+    await stop(second.instance);
+  } finally {
+    base = previous;
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("runner jobs are allowlisted and claims are single-owner", async () => {
   assert.equal((await request("/api/runner/jobs", { method: "POST", body: { kind: "shell", objective: "bad" } })).status, 400);
   const queued = await request("/api/runner/jobs", { method: "POST", body: { kind: "health-probe", objective: "check" } });
@@ -232,10 +287,10 @@ test("runner completion requires owning runner, boolean outcome and active state
   const queued = await request("/api/runner/jobs", { method: "POST", body: { kind: "inventory", objective: "inventory" } });
   const job = (await request("/api/runner/claim", { method: "POST", body: { runner: "worker-a" } })).body;
   assert.equal(job.id, queued.body.id);
-  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-b", ok: true } })).status, 403);
-  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-a", ok: "yes" } })).status, 400);
-  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-a", ok: true, note: "done" } })).status, 200);
-  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-a", ok: true } })).status, 409);
+  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-b", claimToken: job.claimToken, ok: true } })).status, 403);
+  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-a", claimToken: job.claimToken, ok: "yes" } })).status, 400);
+  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-a", claimToken: job.claimToken, ok: true, note: "done" } })).status, 200);
+  assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-a", claimToken: job.claimToken, ok: true } })).status, 409);
 });
 
 test("search is authenticated and query length is bounded", async () => {
