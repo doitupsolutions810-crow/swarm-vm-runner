@@ -27,7 +27,7 @@ const trust = {
   swarmReceiptPrivateKeyPem: receiptKeys.privateKey.export({ type: "pkcs8", format: "pem" }),
 };
 
-function makeRequest(payload = { objective: "execute the four specialist roles" }) {
+function makeRequest(payload = { objective: "execute the four specialist roles", action: { type: "Execute", resource: "swarm.jobs", method: "POST" } }) {
   const now = Date.now();
   const capability = {
     id: "cap-integration-1", issuer: trust.capabilityAuthorityIssuer, audience,
@@ -42,7 +42,6 @@ function makeRequest(payload = { objective: "execute the four specialist roles" 
   return {
     envelope: { ...unsigned, signature: signObject(unsigned, issuerKeys.privateKey) },
     payload, capability, capability_signature: signObject(capability, caKeys.privateKey),
-    action: { type: "Execute", resource: "swarm.jobs", method: "POST" },
   };
 }
 
@@ -113,7 +112,10 @@ test("method substitution is rejected before job persistence", async () => {
   const instance = await start(dir);
   try {
     const request = makeRequest();
-    request.action.method = "DELETE";
+    request.payload.action.method = "DELETE";
+    const changed = { ...request.envelope, payload_digest: digestJson(request.payload) };
+    delete changed.signature;
+    request.envelope = { ...changed, signature: signObject(changed, issuerKeys.privateKey) };
     const rejected = await post(instance.base, request);
     assert.equal(rejected.status, 403);
     const jobs = await fetch(`${instance.base}/api/jobs`, { headers: { authorization: `Bearer ${readToken}` } }).then((r) => r.json());
