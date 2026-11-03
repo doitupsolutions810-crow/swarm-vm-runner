@@ -18,6 +18,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SWARM_TENANT: ${SWARM_TENANT:-control12}
       SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_RUNNER_TOKEN: ${SWARM_RUNNER_TOKEN}
       SWARM_DEBUGGER_TOKEN: ${SWARM_DEBUGGER_TOKEN}
       SWARM_CODER_TOKEN: ${SWARM_CODER_TOKEN}
       SWARM_TESTER_TOKEN: ${SWARM_TESTER_TOKEN}
@@ -44,7 +46,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: debugger
       SWARM_TENANT: ${SWARM_TENANT:-control12}
-      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_DEBUGGER_TOKEN}
     depends_on:
       coordinator:
@@ -95,6 +97,8 @@ services:
     environment:
       COORDINATOR_URL: http://coordinator:4100
       SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_RUNNER_TOKEN: ${SWARM_RUNNER_TOKEN}
       INTERNAL_RUNNER_NAME: ${INTERNAL_RUNNER_NAME:-control12-internal-1}
     depends_on:
       coordinator:
