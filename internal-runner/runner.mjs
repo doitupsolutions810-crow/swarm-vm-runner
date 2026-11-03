@@ -24,7 +24,7 @@ export function validateRunnerConfig(env = process.env) {
 
 function safeQuery(raw) {
   const q = String(raw || "").trim().slice(0, 80);
-  return /^[a-zA-Z0-9._\\-/ ]{2,80}$/.test(q) ? q : null;
+  return /^[a-zA-Z0-9._/ -]{2,80}$/.test(q) ? q : null;
 }
 
 function delay(ms, signal, setTimeoutImpl = setTimeout, clearTimeoutImpl = clearTimeout) {
