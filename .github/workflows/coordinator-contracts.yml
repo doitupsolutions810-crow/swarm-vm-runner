@@ -38,7 +38,9 @@ jobs:
           node-version: "22"
       - name: Syntax check
         working-directory: coordinator
-        run: node --check server.js && node --check server.test.js
+        run: node --check server.js && node --check server.test.js && node --check integration-contract.js && node --check integration-adapter.js && node --check integration-server.test.js
+      - name: Worker bridge tests
+        run: node --test worker/execute.test.js
       - name: Shell syntax check
         run: bash -n scripts/prove-success.sh && bash -n scripts/test-prove-success.sh
       - name: Proof script negative tests
