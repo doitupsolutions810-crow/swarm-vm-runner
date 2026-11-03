@@ -5,6 +5,12 @@ on:
     branches: ["main", "security/**"]
     paths:
       - "coordinator/**"
+      - "worker/**"
+      - "internal-runner/**"
+      - "scripts/prove-success.sh"
+      - "docker-compose.yml"
+      - ".env.example"
+      - "SUCCESS_CRITERIA.md"
       - ".github/workflows/coordinator-contracts.yml"
   pull_request:
     paths:
@@ -25,6 +31,8 @@ jobs:
       - name: Syntax check
         working-directory: coordinator
         run: node --check server.js && node --check server.test.js
+      - name: Shell syntax check
+        run: bash -n scripts/prove-success.sh
       - name: Adversarial coordinator contracts
         working-directory: coordinator
         run: npm test
