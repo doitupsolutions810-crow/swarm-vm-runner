@@ -101,8 +101,9 @@ export function validateCompletedJob(job, {
       || !coder.artifacts.every(item => typeof item.path === "string" && /^sha256:[a-f0-9]{64}$/.test(item.sha256 || ""))) {
     throw new Error("coder artifacts missing or malformed");
   }
-  if (!expectedArtifacts.length || !expectedArtifacts.every(expected => coder.artifacts.some(item => item.path === expected.path && item.sha256 === expected.sha256))) {
-    throw new Error("coder smoke artifact paths or exact content hashes do not match");
+  if (!expectedArtifacts.length || coder.artifacts.length !== expectedArtifacts.length
+      || !expectedArtifacts.every(expected => coder.artifacts.some(item => item.path === expected.path && item.sha256 === expected.sha256))) {
+    throw new Error("coder smoke artifact set or exact content hashes do not match");
   }
   if (!Array.isArray(tester.tests) || !tester.tests.length || !tester.tests.every(item => typeof item.command === "string" && item.exit_code === 0)
       || !tester.tests.some(item => item.command === expectedTestCommand)) {
