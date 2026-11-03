@@ -190,7 +190,7 @@ test("executor request forwards the active claim and role-scoped coordinator cre
     ...tokens, workerId: "tester-worker-7", claimToken: "c".repeat(40), fetchImpl,
   });
   assert.equal(out.reported, true);
-  assert.equal(calls[0].options.headers["x-swarm-coordinator-token"], "role-token-".padEnd(40, "r"));
+  assert.equal(calls[0].options.headers["x-swarm-coordinator-token"], tokens.roleToken);
   assert.deepEqual(JSON.parse(calls[0].options.body), {
     jobId: job.id, role: "tester", objective: job.objective,
     claimToken: "c".repeat(40), workerId: "tester-worker-7",
