@@ -126,13 +126,24 @@ test("smoke verifier rejects failed or fabricated tester evidence", () => {
   }), /role-specific evidence report/);
 });
 
+test("smoke verifier rejects unexpected changes outside the two smoke artifacts", () => {
+  const job = validJob();
+  job.events[1] = makeEvent("coder", {
+    artifacts: [...expectedArtifacts, { path: "src/production.js", sha256: digest("unexpected") }]
+  });
+  assert.throws(() => validateCompletedJob(job, {
+    expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
+    expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
+  }), /coder smoke artifact set/);
+});
+
 test("smoke verifier rejects malformed coder artifacts and governance rejection", () => {
   const malformed = validJob();
   malformed.events[1] = makeEvent("coder", { artifacts: [{ path: "../escape", sha256: "bad" }] });
   assert.throws(() => validateCompletedJob(malformed, {
     expectedJobId: jobId, expectedTenant: tenant, expectedExecutor: executor,
     expectedArtifacts, expectedTestCommand, publicKeyPem, nowMs
-  }), /role-specific evidence report|coder artifacts|smoke artifact paths or exact content hashes/);
+  }), /role-specific evidence report|coder artifacts|smoke artifact set or exact content hashes/);
   const rejected = validJob();
   rejected.events[3] = makeEvent("governance", { decision: "reject", checks: [{ name: "tests", passed: false }] });
   assert.throws(() => validateCompletedJob(rejected, {
