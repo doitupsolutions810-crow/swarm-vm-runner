@@ -347,13 +347,14 @@ export function createServer({
       if (req.method === "POST" && workerRoute && workerRoute[2] === "validate") {
         const payload = await readJson(req);
         const role = workerRoute[1];
-        if (typeof payload.jobId !== "string" || typeof payload.workerId !== "string"
+        if (typeof payload.jobId !== "string" || typeof payload.tenant !== "string" || typeof payload.workerId !== "string"
             || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.workerId)
             || typeof payload.claimToken !== "string" || payload.claimToken.length < 32) {
           return json(res, 400, { error: "jobId, workerId, and claimToken required" });
         }
         const job = jobs.get(payload.jobId);
         if (!job) return json(res, 404, { error: "unknown job" });
+        if (payload.tenant !== job.tenant) return json(res, 403, { error: "tenant mismatch" });
         const lease = job.lease;
         if (!lease || lease.role !== role || lease.workerId !== payload.workerId || lease.claimToken !== payload.claimToken) {
           return json(res, 403, { error: "active specialist claim does not match" });
@@ -362,7 +363,7 @@ export function createServer({
         if (job.chain?.[job.step] !== role || job.status === "completed" || job.status === "failed") {
           return json(res, 409, { error: "job is no longer claimable by this role" });
         }
-        return json(res, 200, { valid: true, jobId: job.id, role, workerId: lease.workerId, leaseExpiresAt: lease.expiresAt });
+        return json(res, 200, { valid: true, jobId: job.id, tenant: job.tenant, role, workerId: lease.workerId, leaseExpiresAt: lease.expiresAt });
       }
       if (req.method === "POST" && workerRoute && workerRoute[2] === "claim") {
         const payload = await readJson(req);
@@ -451,6 +452,7 @@ export function createServer({
           if (job.status === "completed" || job.status === "failed") return { status: 409, body: { error: "job is terminal" } };
           const expectedRole = job.chain[job.step];
           if (payload.role !== expectedRole) return { status: 409, body: { error: "role is not next in chain", expectedRole } };
+          if (payload.tenant !== job.tenant) return { status: 403, body: { error: "tenant mismatch" } };
           if (payload.status !== "passed" && payload.status !== "failed") return { status: 400, body: { error: "status must be passed or failed" } };
           if (job.events.some((event) => event.role === payload.role)) return { status: 409, body: { error: "role already reported" } };
           const lease = job.lease;
