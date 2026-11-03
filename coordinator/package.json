@@ -5,6 +5,6 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "test": "node --test server.test.js integration-contract.test.js"
+    "test": "node --test server.test.js integration-contract.test.js integration-adapter.test.js"
   }
 }
