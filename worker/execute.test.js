@@ -179,6 +179,25 @@ test("rejects invalid or unsafe timeout values before making network calls", asy
 });
 
 
+test("lease cancellation aborts the executor request and keeps the result pending", async () => {
+  const controller = new AbortController();
+  let observedSignal;
+  const out = await executeRoleTask({
+    job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
+    ...tokens, signal: controller.signal,
+    fetchImpl: async (_url, options) => {
+      observedSignal = options.signal;
+      controller.abort(new Error("lease lost"));
+      if (options.signal.aborted) throw new Error("aborted");
+      throw new Error("expected abort");
+    },
+  });
+  assert.equal(out.reported, false);
+  assert.equal(out.pending, true);
+  assert.match(out.reason, /transport unavailable/);
+  assert.equal(observedSignal.aborted, true);
+});
+
 test("executor transport failure with a configured deadline remains pending", async () => {
   const out = await executeRoleTask({
     job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
