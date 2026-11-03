@@ -109,6 +109,9 @@ services:
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_RUNNER_TOKEN: ${SWARM_RUNNER_TOKEN}
       INTERNAL_RUNNER_NAME: ${INTERNAL_RUNNER_NAME:-control12-internal-1}
+      RUNNER_LEASE_MS: ${RUNNER_LEASE_MS:-30000}
+      RUNNER_HEARTBEAT_MS: ${RUNNER_HEARTBEAT_MS:-10000}
+      POLL_MS: ${POLL_MS:-3000}
     depends_on:
       coordinator:
         condition: service_healthy
