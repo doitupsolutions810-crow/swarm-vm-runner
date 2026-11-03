@@ -40,7 +40,10 @@ async function readJson(req) {
     throw error;
   }
   let value;
-  try { value = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); }
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    value = JSON.parse(decoded || "{}");
+  }
   catch {
     const error = new Error("invalid json");
     error.status = 400;
