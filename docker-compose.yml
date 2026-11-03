@@ -59,7 +59,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: coder
       SWARM_TENANT: ${SWARM_TENANT:-control12}
-      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_CODER_TOKEN}
     depends_on:
       coordinator:
@@ -72,7 +72,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: tester
       SWARM_TENANT: ${SWARM_TENANT:-control12}
-      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_TESTER_TOKEN}
     depends_on:
       coordinator:
@@ -85,7 +85,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: governance
       SWARM_TENANT: ${SWARM_TENANT:-control12}
-      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_ROLE_TOKEN: ${SWARM_GOVERNANCE_TOKEN}
     depends_on:
       coordinator:
