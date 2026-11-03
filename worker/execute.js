@@ -28,7 +28,7 @@ export async function executeRoleTask({
         "content-type": "application/json",
         "x-swarm-coordinator-token": roleToken,
       },
-      body: JSON.stringify({ jobId: job.id, role, objective: job.objective, ...(tenant ? { tenant } : {}), ...(tenant ? { tenant } : {}), ...(claimToken ? { claimToken } : {}), ...(workerId ? { workerId } : {}) }),
+      body: JSON.stringify({ jobId: job.id, role, objective: job.objective, ...(tenant ? { tenant } : {}), ...(claimToken ? { claimToken } : {}), ...(workerId ? { workerId } : {}) }),
       signal: executorSignal,
     });
   } catch (error) {
@@ -51,7 +51,7 @@ export async function executeRoleTask({
     report = await fetchImpl(coordinatorUrl + "/api/events", {
       method: "POST",
       headers: { authorization: "Bearer " + roleToken, "content-type": "application/json" },
-      body: JSON.stringify({ jobId: job.id, role, status: expected, note, evidence: result.evidence, evidence_signature: result.evidence_signature, ...(claimToken ? { claimToken } : {}), ...(workerId ? { workerId } : {}) }),
+      body: JSON.stringify({ jobId: job.id, role, status: expected, note, evidence: result.evidence, evidence_signature: result.evidence_signature, ...(tenant ? { tenant } : {}), ...(claimToken ? { claimToken } : {}), ...(workerId ? { workerId } : {}) }),
       signal: coordinatorSignal,
     });
   } catch (error) {
