@@ -70,8 +70,6 @@ test("runner renews long-running work and a single process never overlaps ticks"
   let renewalCount = 0;
   let completionCount = 0;
   let releaseSearch;
-  let renewalObserved;
-  const renewed = new Promise(resolve => { renewalObserved = resolve; });
   const fetchImpl = async (url, options = {}) => {
     const parsed = new URL(String(url));
     if (parsed.pathname === "/api/runner/claim") {
@@ -80,7 +78,6 @@ test("runner renews long-running work and a single process never overlaps ticks"
     }
     if (parsed.pathname === "/api/runner/renew") {
       renewalCount += 1;
-      renewalObserved();
       return jsonResponse(200, {
         id: "run-123", runner: RUNNER_NAME, leaseExpiresAt: Date.now() + 5000,
       });
@@ -113,7 +110,7 @@ test("runner renews long-running work and a single process never overlaps ticks"
   });
 
   const running = runner.tick();
-  await renewed;
+  await waitFor(() => renewalCount >= 1);
   const overlapping = await runner.tick();
   assert.equal(overlapping.skipped, true);
   assert.equal(claimCount, 1);
