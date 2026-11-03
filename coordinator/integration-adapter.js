@@ -5,7 +5,8 @@ const ENQUEUE_ACTION = Object.freeze({ type: "Execute", resource: "swarm.jobs", 
 export async function authorizeAndEnqueue({ request, trust, nowMs = Date.now(), previousReceiptDigest = null, commit }) {
   if (typeof commit !== "function") throw new TypeError("durable commit callback is required");
   if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("integration request must be an object");
-  const { envelope, payload, capability, capability_signature: capabilitySignature, action } = request;
+  const { envelope, payload, capability, capability_signature: capabilitySignature } = request;
+  const action = payload?.action;
   let envelopeResult;
   try {
     envelopeResult = verifyEnvelope({
