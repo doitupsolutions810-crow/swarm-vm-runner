@@ -18,7 +18,8 @@ async function claim() {
   return res.json();
 }
 async function complete(id, result) {
-  await fetch(`${COORDINATOR}/api/runner/complete`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${RUNNER_TOKEN}` }, body: JSON.stringify({ id, runner: NAME, ...result }) });
+  const res = await fetch(`${COORDINATOR}/api/runner/complete`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${RUNNER_TOKEN}` }, body: JSON.stringify({ id, runner: NAME, ...result }) });
+  if (!res.ok) throw new Error(`complete ${res.status}`);
 }
 function safeQuery(raw) {
   const q = String(raw || "").trim().slice(0, 80);
