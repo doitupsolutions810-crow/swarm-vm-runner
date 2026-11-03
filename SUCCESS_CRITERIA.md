@@ -2,7 +2,7 @@
 
 ## Coordinator protocol (required)
 
-1. Compose starts coordinator + four role workers + Redis.
+1. Compose starts coordinator + four role workers with the persistent state volume.
 2. `GET /health` returns HTTP 200.
 3. Authenticated `POST /api/jobs` accepts a bounded objective and returns a unique ID.
 4. Read, coordinator-write, runner, and four worker-role credentials are distinct and fail closed when missing or reused.
@@ -10,7 +10,7 @@
 6. Duplicate, out-of-order, malformed, oversized, invalid-UTF-8, and post-terminal events are rejected.
 7. Internal runner completion is bound to the runner that claimed the job.
 
-## Actual execution (not yet satisfied)
+The coordinator state journal is fsync-backed and replayed on restart; interrupted final appends are ignored, while malformed interior records fail startup. Runner claims are leased and carry fresh claim tokens after restart.\n\n## Actual execution (not yet satisfied)
 
 The current four worker containers are protocol stubs. They intentionally report a
 failed event until a real executor is configured. A successful HTTP handshake or
