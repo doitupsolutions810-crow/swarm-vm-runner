@@ -108,6 +108,7 @@ export function createServer({
   swarmReceiptPrivateKeyPem = loadSecret(process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_PEM, process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE),
   executorPublicKeyPem = loadSecret(process.env.SWARM_EXECUTOR_PUBLIC_KEY_PEM, process.env.SWARM_EXECUTOR_PUBLIC_KEY_FILE),
   executorId = process.env.SWARM_EXECUTOR_ID || "",
+  now = () => Date.now(),
   avroneIssuer = process.env.SWARM_AVRONE_ISSUER || "",
   swarmAudience = process.env.SWARM_SERVICE_IDENTITY || "",
   capabilityAuthorityIssuer = process.env.SWARM_CAPABILITY_AUTHORITY_ISSUER || "spiffe://prod/broker",
@@ -291,10 +292,12 @@ export function createServer({
         } else if (req.method === "POST" && url.pathname === "/api/integration/enqueue") {
           // The signed envelope and capability are the caller authentication boundary.
         } else {
-          const credential = req.method === "GET" && (url.pathname === "/api/jobs" || url.pathname === "/api/search")
-            ? readToken
-            : url.pathname.startsWith("/api/runner/") ? runnerToken : token;
-          const label = credential === readToken ? "read" : credential === runnerToken ? "runner" : "coordinator";
+          const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew)$/.exec(url.pathname);
+          const credential = workerRoute ? roleTokens?.[workerRoute[1]]
+            : req.method === "GET" && (url.pathname === "/api/jobs" || url.pathname === "/api/search")
+              ? readToken
+              : url.pathname.startsWith("/api/runner/") ? runnerToken : token;
+          const label = workerRoute ? workerRoute[1] : credential === readToken ? "read" : credential === runnerToken ? "runner" : "coordinator";
           if (typeof credential !== "string" || credential.length < 32) return json(res, 503, { error: `${label} authentication is not configured` });
           if (!authorized(req, credential)) return json(res, 401, { error: `unauthorized ${label} client` });
         }
@@ -332,7 +335,60 @@ export function createServer({
         });
         return json(res, outcome.status, outcome.body);
       }
-      if (req.method === "GET" && url.pathname === "/api/jobs") return json(res, 200, { jobs: [...jobs.values()] });
+      if (req.method === "GET" && url.pathname === "/api/jobs") {
+        const visibleJobs = [...jobs.values()].map((job) => {
+          const copy = structuredClone(job);
+          if (copy.lease) copy.lease = { role: copy.lease.role, workerId: copy.lease.workerId, expiresAt: copy.lease.expiresAt };
+          return copy;
+        });
+        return json(res, 200, { jobs: visibleJobs });
+      }
+      const workerRoute = /^\/api\/worker\/(debugger|coder|tester|governance)\/(claim|renew)$/.exec(url.pathname);
+      if (req.method === "POST" && workerRoute && workerRoute[2] === "claim") {
+        const payload = await readJson(req);
+        const role = workerRoute[1];
+        if (typeof payload.workerId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.workerId)) return json(res, 400, { error: "valid workerId required" });
+        const leaseMs = payload.leaseMs === undefined ? 120000 : payload.leaseMs;
+        if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > 600000) return json(res, 400, { error: "leaseMs must be an integer in 1000..600000" });
+        const outcome = await serializeMutation(async () => {
+          const timestamp = now();
+          for (const candidate of jobs.values()) {
+            if (candidate.status === "completed" || candidate.status === "failed" || candidate.chain?.[candidate.step] !== role) continue;
+            if (candidate.lease && Number(candidate.lease.expiresAt) > timestamp) continue;
+            const next = structuredClone(candidate);
+            const claimToken = randomUUID();
+            next.lease = { role, workerId: payload.workerId, claimToken, claimedAt: timestamp, expiresAt: timestamp + leaseMs };
+            await persist({ type: "job", job: next });
+            jobs.set(next.id, next);
+            return { status: 200, body: { ...next, claimToken, leaseExpiresAt: next.lease.expiresAt } };
+          }
+          return { status: 204, body: null };
+        });
+        if (outcome.status === 204) { res.writeHead(204); return res.end(); }
+        return json(res, outcome.status, outcome.body);
+      }
+      if (req.method === "POST" && workerRoute && workerRoute[2] === "renew") {
+        const payload = await readJson(req);
+        const role = workerRoute[1];
+        if (typeof payload.workerId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.workerId)
+            || typeof payload.claimToken !== "string" || payload.claimToken.length < 32) return json(res, 400, { error: "workerId and claimToken required" });
+        const leaseMs = payload.leaseMs === undefined ? 120000 : payload.leaseMs;
+        if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > 600000) return json(res, 400, { error: "leaseMs must be an integer in 1000..600000" });
+        const outcome = await serializeMutation(async () => {
+          const job = jobs.get(payload.jobId);
+          if (!job) return { status: 404, body: { error: "unknown job" } };
+          const lease = job.lease;
+          if (!lease || lease.role !== role || lease.workerId !== payload.workerId || lease.claimToken !== payload.claimToken) return { status: 403, body: { error: "claim does not match" } };
+          if (Number(lease.expiresAt) <= now()) return { status: 409, body: { error: "lease expired" } };
+          if (job.chain?.[job.step] !== role || job.status === "completed" || job.status === "failed") return { status: 409, body: { error: "job is no longer claimable by this role" } };
+          const next = structuredClone(job);
+          next.lease.expiresAt = now() + leaseMs;
+          await persist({ type: "job", job: next });
+          jobs.set(next.id, next);
+          return { status: 200, body: { jobId: next.id, role, workerId: payload.workerId, leaseExpiresAt: next.lease.expiresAt } };
+        });
+        return json(res, outcome.status, outcome.body);
+      }
       if (req.method === "POST" && url.pathname === "/api/jobs") {
         const payload = await readJson(req);
         if (!validObjective(payload.objective)) return json(res, 400, { error: "objective required (1..2000 characters)" });
@@ -377,7 +433,11 @@ export function createServer({
           if (payload.role !== expectedRole) return { status: 409, body: { error: "role is not next in chain", expectedRole } };
           if (payload.status !== "passed" && payload.status !== "failed") return { status: 400, body: { error: "status must be passed or failed" } };
           if (job.events.some((event) => event.role === payload.role)) return { status: 409, body: { error: "role already reported" } };
+          const lease = job.lease;
+          if (!lease || lease.role !== payload.role || typeof payload.claimToken !== "string" || lease.claimToken !== payload.claimToken) return { status: 403, body: { error: "active specialist claim required" } };
+          if (Number(lease.expiresAt) <= now()) return { status: 409, body: { error: "specialist claim expired" } };
           const next = structuredClone(job);
+          delete next.lease;
           const note = typeof payload.note === "string" ? payload.note.slice(0, 500) : "";
           next.events.push({
             role: payload.role,
