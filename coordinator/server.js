@@ -1,7 +1,8 @@
 import http from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { createClient } from "./redis-lite.js";
 
 const PORT = Number(process.env.PORT || 4100);
 const TENANT = process.env.SWARM_TENANT || "control12";
@@ -92,19 +93,69 @@ export function createServer({
     governance: process.env.SWARM_GOVERNANCE_TOKEN,
   },
   tenant = TENANT,
-  redis = createClient(process.env.REDIS_URL || "redis://redis:6379"),
+  stateDir = process.env.SWARM_STATE_DIR || "/var/swarm",
 } = {}) {
+  fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const journalPath = path.join(stateDir, "coordinator.jsonl");
   const jobs = new Map();
   const runnerJobs = new Map();
   const runnerQueue = [];
   let seq = 1;
   let runSeq = 1;
+  let persistQueue = Promise.resolve();
+
+  if (fs.existsSync(journalPath)) {
+    const raw = fs.readFileSync(journalPath, "utf8");
+    const lines = raw.split("\n");
+    if (!raw.endsWith("\n")) lines.pop();
+    for (const line of lines) {
+      if (!line) continue;
+      const record = JSON.parse(line);
+      if (record.type === "job" && record.job && typeof record.job.id === "string") {
+        jobs.set(record.job.id, record.job);
+        const n = Number(record.job.id.replace(/^job-/, ""));
+        if (Number.isSafeInteger(n)) seq = Math.max(seq, n + 1);
+      } else if (record.type === "runner-job" && record.job && typeof record.job.id === "string") {
+        runnerJobs.set(record.job.id, record.job);
+        const n = Number(record.job.id.replace(/^run-/, ""));
+        if (Number.isSafeInteger(n)) runSeq = Math.max(runSeq, n + 1);
+      } else {
+        throw new Error("coordinator journal contains an unknown record");
+      }
+    }
+  }
+  for (const job of runnerJobs.values()) {
+    if (job.status === "queued") runnerQueue.push(job.id);
+    else if (job.status === "running") {
+      job.status = "queued";
+      delete job.runner;
+      delete job.claimToken;
+      delete job.claimedAt;
+      delete job.leaseExpiresAt;
+      runnerQueue.push(job.id);
+      fs.appendFileSync(journalPath, JSON.stringify({ type: "runner-job", job }) + "\n", { mode: 0o600 });
+    }
+  }
+
+  function persist(record) {
+    const operation = persistQueue.then(async () => {
+      const handle = await fs.promises.open(journalPath, "a", 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(record) + "\n", "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    });
+    persistQueue = operation.catch(() => {});
+    return operation;
+  }
 
   async function createSwarmJob(objective) {
     const id = `job-${seq++}`;
     const job = { id, tenant, objective: objective.trim(), status: "queued", chain: [...ROLES], step: 0, createdAt: new Date().toISOString(), events: [] };
+    await persist({ type: "job", job });
     jobs.set(id, job);
-    await redis.lpush(`swarm:${tenant}:debugger`, id);
     return job;
   }
 
@@ -112,7 +163,7 @@ export function createServer({
     const url = new URL(req.url, "http://127.0.0.1");
     try {
       if (req.method === "GET" && url.pathname === "/health") {
-        return json(res, 200, { ok: true, tenant, jobs: jobs.size, runnerJobs: runnerJobs.size, runnerQueued: runnerQueue.length, roles: ROLES, redis: redis.ok });
+        return json(res, 200, { ok: true, tenant, jobs: jobs.size, runnerJobs: runnerJobs.size, runnerQueued: runnerQueue.length, roles: ROLES, persistence: "fsync-jsonl" });
       }
       if (url.pathname.startsWith("/api/")) {
         if (!validCredentialSet(token, readToken, runnerToken, roleTokens)) {
@@ -162,15 +213,18 @@ export function createServer({
         if (payload.role !== expectedRole) return json(res, 409, { error: "role is not next in chain", expectedRole });
         if (payload.status !== "passed" && payload.status !== "failed") return json(res, 400, { error: "status must be passed or failed" });
         if (job.events.some((event) => event.role === payload.role)) return json(res, 409, { error: "role already reported" });
+        const next = structuredClone(job);
         const note = typeof payload.note === "string" ? payload.note.slice(0, 500) : "";
-        job.events.push({ role: payload.role, status: payload.status, note, at: new Date().toISOString() });
-        if (payload.status === "failed") job.status = "failed";
-        else if (job.step < ROLES.length - 1) {
-          job.step += 1;
-          job.status = "running";
-          await redis.lpush(`swarm:${tenant}:${ROLES[job.step]}`, job.id);
-        } else job.status = "completed";
-        return json(res, 200, job);
+        next.events.push({ role: payload.role, status: payload.status, note, at: new Date().toISOString() });
+        if (payload.status === "failed") next.status = "failed";
+        else if (next.step < ROLES.length - 1) {
+          next.step += 1;
+          next.status = "running";
+        } else next.status = "completed";
+        jobs.set(next.id, next);
+        try { await persist({ type: "job", job: next }); }
+        catch (error) { jobs.set(job.id, job); throw error; }
+        return json(res, 200, next);
       }
       if (req.method === "GET" && url.pathname === "/api/runner/jobs") return json(res, 200, { jobs: [...runnerJobs.values()] });
       if (req.method === "POST" && url.pathname === "/api/runner/jobs") {
@@ -181,6 +235,7 @@ export function createServer({
         if (typeof objective !== "string" || objective.length > MAX_OBJECTIVE) return json(res, 400, { error: "invalid objective" });
         const id = `run-${runSeq++}`;
         const job = { id, kind, query: String(payload.query || "").slice(0, 80), objective: objective.slice(0, MAX_OBJECTIVE), status: "queued", createdAt: new Date().toISOString() };
+        await persist({ type: "runner-job", job });
         runnerJobs.set(id, job);
         runnerQueue.push(id);
         return json(res, 202, job);
@@ -188,28 +243,42 @@ export function createServer({
       if (req.method === "POST" && url.pathname === "/api/runner/claim") {
         const payload = await readJson(req);
         if (typeof payload.runner !== "string" || !/^[A-Za-z0-9_.-]{1,80}$/.test(payload.runner)) return json(res, 400, { error: "valid runner name required" });
+        const now = Date.now();
+        for (const candidate of runnerJobs.values()) {
+          if (candidate.status === "running" && Number(candidate.leaseExpiresAt) <= now) {
+            const requeued = { ...candidate, status: "queued" };
+            delete requeued.runner;
+            delete requeued.claimToken;
+            delete requeued.claimedAt;
+            delete requeued.leaseExpiresAt;
+            await persist({ type: "runner-job", job: requeued });
+            runnerJobs.set(requeued.id, requeued);
+            runnerQueue.push(requeued.id);
+          }
+        }
         const id = runnerQueue.shift();
         if (!id) { res.writeHead(204); return res.end(); }
         const job = runnerJobs.get(id);
         if (!job || job.status !== "queued") return json(res, 409, { error: "queue state inconsistent" });
-        job.status = "running";
-        job.runner = payload.runner;
-        job.claimedAt = new Date().toISOString();
-        return json(res, 200, job);
+        const claimed = { ...job, status: "running", runner: payload.runner, claimToken: randomUUID(), claimedAt: new Date().toISOString(), leaseExpiresAt: Date.now() + 30000 };
+        try { await persist({ type: "runner-job", job: claimed }); }
+        catch (error) { runnerQueue.unshift(id); throw error; }
+        runnerJobs.set(id, claimed);
+        return json(res, 200, claimed);
       }
       if (req.method === "POST" && url.pathname === "/api/runner/complete") {
         const payload = await readJson(req);
         const job = runnerJobs.get(payload.id);
         if (!job) return json(res, 404, { error: "unknown runner job" });
         if (job.status !== "running") return json(res, 409, { error: "runner job is not active" });
-        if (payload.runner !== job.runner) return json(res, 403, { error: "runner does not own job" });
+        if (payload.runner !== job.runner || payload.claimToken !== job.claimToken) return json(res, 403, { error: "runner claim does not match" });
         if (typeof payload.ok !== "boolean") return json(res, 400, { error: "ok boolean required" });
-        job.status = payload.ok ? "completed" : "failed";
-        job.note = typeof payload.note === "string" ? payload.note.slice(0, 500) : "";
-        if (Array.isArray(payload.hits)) job.hits = payload.hits.slice(0, 20);
-        if (payload.spawned && typeof payload.spawned === "object" && !Array.isArray(payload.spawned)) job.spawned = payload.spawned;
-        job.completedAt = new Date().toISOString();
-        return json(res, 200, job);
+        const completed = { ...job, status: payload.ok ? "completed" : "failed", note: typeof payload.note === "string" ? payload.note.slice(0, 500) : "", completedAt: new Date().toISOString() };
+        if (Array.isArray(payload.hits)) completed.hits = payload.hits.slice(0, 20);
+        if (payload.spawned && typeof payload.spawned === "object" && !Array.isArray(payload.spawned)) completed.spawned = payload.spawned;
+        await persist({ type: "runner-job", job: completed });
+        runnerJobs.set(job.id, completed);
+        return json(res, 200, completed);
       }
       if (req.method === "GET" && url.pathname === "/api/search") {
         const q = (url.searchParams.get("q") || "").toLowerCase();
@@ -224,6 +293,7 @@ export function createServer({
       return json(res, Number.isInteger(error.status) ? error.status : 400, { error: error.status ? error.message : "invalid request" });
     }
   });
+  server.stateDir = stateDir;
   server.requestTimeout = 10000;
   server.headersTimeout = 12000;
   server.keepAliveTimeout = 5000;
