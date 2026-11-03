@@ -1,10 +1,10 @@
 import http from "node:http";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createPublicKey, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { authorizeAndEnqueue } from "./integration-adapter.js";
-import { digestJson } from "./integration-contract.js";
+import { digestJson, verifySignedReceipt } from "./integration-contract.js";
 
 const PORT = Number(process.env.PORT || 4100);
 const TENANT = process.env.SWARM_TENANT || "control12";
@@ -117,7 +117,35 @@ export function createServer({
   const runnerQueue = [];
   const integrationMessages = new Map();
   const integrationCorrelations = new Map();
+  const receiptPublicKeyPem = swarmReceiptPrivateKeyPem
+    ? createPublicKey(swarmReceiptPrivateKeyPem).export({ type: "spki", format: "pem" })
+    : "";
   let lastReceiptDigest = null;
+
+  function recoverReceipt(record, jobId) {
+    if (!receiptPublicKeyPem) throw new Error("receipt signing key is required to recover signed integration history");
+    verifySignedReceipt({ receipt: record.receipt, publicKeyPem: receiptPublicKeyPem });
+    if (record.receipt.previous_receipt_digest !== lastReceiptDigest) throw new Error("signed receipt chain is broken");
+    if (record.receipt.message_id !== record.message_id
+        || record.receipt.correlation_id !== record.correlation_id
+        || record.receipt.capability_id !== record.capability_id
+        || record.receipt.payload_digest !== record.payload_digest
+        || record.receipt.action !== record.action) {
+      throw new Error("signed receipt does not match its journal record");
+    }
+    const ledger = {
+      messageId: record.message_id,
+      correlationId: record.correlation_id,
+      payloadDigest: record.payload_digest,
+      capabilityId: record.capability_id,
+      action: record.action,
+      jobId,
+      receipt: record.receipt,
+    };
+    integrationMessages.set(ledger.messageId, ledger);
+    integrationCorrelations.set(ledger.correlationId, ledger);
+    lastReceiptDigest = digestJson(record.receipt);
+  }
   let seq = 1;
   let runSeq = 1;
   let persistQueue = Promise.resolve();
@@ -154,15 +182,9 @@ export function createServer({
         jobs.set(record.job.id, record.job);
         const n = Number(record.job.id.replace(/^job-/, ""));
         if (Number.isSafeInteger(n)) seq = Math.max(seq, n + 1);
-        const ledger = { messageId: record.message_id, correlationId: record.correlation_id, payloadDigest: record.payload_digest, capabilityId: record.capability_id, action: record.action, jobId: record.job.id, receipt: record.receipt };
-        integrationMessages.set(ledger.messageId, ledger);
-        integrationCorrelations.set(ledger.correlationId, ledger);
-        lastReceiptDigest = digestJson(record.receipt);
+        recoverReceipt(record, record.job.id);
       } else if (record.type === "integration-ledger" && record.receipt) {
-        const ledger = { messageId: record.message_id, correlationId: record.correlation_id, payloadDigest: record.payload_digest, capabilityId: record.capability_id, action: record.action, jobId: record.job_id, receipt: record.receipt };
-        integrationMessages.set(ledger.messageId, ledger);
-        integrationCorrelations.set(ledger.correlationId, ledger);
-        lastReceiptDigest = digestJson(record.receipt);
+        recoverReceipt(record, record.job_id);
       } else {
         throw new Error("coordinator journal contains an unknown record");
       }
