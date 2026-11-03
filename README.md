@@ -19,6 +19,35 @@ docker compose --profile runner --profile content up --build
 ```
 
 
+## Coordinator authentication
+
+The coordinator keeps `/health` public for container health checks. Every `/api/*`
+route requires a bearer token. Set `SWARM_API_TOKEN` to a unique random value of
+at least 32 characters. Each worker event route additionally requires its own
+role credential: `SWARM_DEBUGGER_TOKEN`, `SWARM_CODER_TOKEN`,
+`SWARM_TESTER_TOKEN`, and `SWARM_GOVERNANCE_TOKEN`. Do not reuse one token
+across roles.
+
+Generate five independent values and place them in the local `.env` file:
+
+```bash
+for name in SWARM_API_TOKEN SWARM_DEBUGGER_TOKEN SWARM_CODER_TOKEN SWARM_TESTER_TOKEN SWARM_GOVERNANCE_TOKEN; do
+  printf '%s=%s\\n' "$name" "$(openssl rand -hex 32)"
+done
+```
+
+The coordinator rejects oversized or malformed request bodies, enforces the
+debugger → coder → tester → governance transition order, rejects duplicate or
+terminal-state reports, and binds runner completion to the runner that claimed
+the job. These controls harden the coordinator protocol; they do not make the
+optional GitHub Actions runner safe for untrusted pull-request code.
+
+Run the coordinator contract suite with:
+
+```bash
+cd coordinator && npm test
+```
+
 ## Security boundary (important)
 
 The optional `runner` profile is **not approved for untrusted pull-request code**.
