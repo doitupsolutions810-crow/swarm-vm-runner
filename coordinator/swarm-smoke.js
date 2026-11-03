@@ -122,6 +122,15 @@ export function validateCompletedJob(job, {
       || !tester.tests.some(item => item.command === expectedTestCommand)) {
     throw new Error("tester did not provide successful smoke test evidence");
   }
+  if (!Array.isArray(governance.artifact_inventory)
+      || governance.artifact_inventory.length !== expectedArtifacts.length
+      || !expectedArtifacts.every(expected => governance.artifact_inventory.some(item => item.path === expected.path && item.sha256 === expected.sha256))) {
+    throw new Error("governance independent artifact inventory does not match the coder artifacts");
+  }
+  if (!Array.isArray(governance.test_commands)
+      || !governance.test_commands.some(item => item.command === expectedTestCommand && item.exit_code === 0)) {
+    throw new Error("governance did not independently run the exact smoke test command");
+  }
   const requiredGovernanceChecks = ["successful terminal execution", "artifact inventory", "successful test command", "explicit governance approval"];
   if (governance.decision !== "approve" || !Array.isArray(governance.checks)
       || !requiredGovernanceChecks.every(name => governance.checks.some(item => item.name === name && item.passed === true))) {
