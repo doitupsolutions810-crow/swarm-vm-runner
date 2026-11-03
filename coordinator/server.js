@@ -3,6 +3,8 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { authorizeAndEnqueue } from "./integration-adapter.js";
+import { digestJson } from "./integration-contract.js";
 
 const PORT = Number(process.env.PORT || 4100);
 const TENANT = process.env.SWARM_TENANT || "control12";
@@ -95,12 +97,21 @@ export function createServer({
   tenant = TENANT,
   stateDir = process.env.SWARM_STATE_DIR || "/var/swarm",
   compactAfterRecords = Number(process.env.SWARM_COMPACT_AFTER_RECORDS || 500),
+  avroneIssuerPublicKeyPem = process.env.SWARM_AVRONE_ISSUER_PUBLIC_KEY_PEM || "",
+  capabilityAuthorityPublicKeyB64 = process.env.SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64 || "",
+  swarmReceiptPrivateKeyPem = process.env.SWARM_RECEIPT_SIGNING_PRIVATE_KEY_PEM || "",
+  avroneIssuer = process.env.SWARM_AVRONE_ISSUER || "",
+  swarmAudience = process.env.SWARM_SERVICE_IDENTITY || "",
+  capabilityAuthorityIssuer = process.env.SWARM_CAPABILITY_AUTHORITY_ISSUER || "spiffe://prod/broker",
 } = {}) {
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const journalPath = path.join(stateDir, "coordinator.jsonl");
   const jobs = new Map();
   const runnerJobs = new Map();
   const runnerQueue = [];
+  const integrationMessages = new Map();
+  const integrationCorrelations = new Map();
+  let lastReceiptDigest = null;
   let seq = 1;
   let runSeq = 1;
   let persistQueue = Promise.resolve();
@@ -133,6 +144,19 @@ export function createServer({
         runnerJobs.set(record.job.id, record.job);
         const n = Number(record.job.id.replace(/^run-/, ""));
         if (Number.isSafeInteger(n)) runSeq = Math.max(runSeq, n + 1);
+      } else if (record.type === "integration-enqueue" && record.job && record.receipt) {
+        jobs.set(record.job.id, record.job);
+        const n = Number(record.job.id.replace(/^job-/, ""));
+        if (Number.isSafeInteger(n)) seq = Math.max(seq, n + 1);
+        const ledger = { messageId: record.message_id, correlationId: record.correlation_id, payloadDigest: record.payload_digest, capabilityId: record.capability_id, action: record.action, jobId: record.job.id, receipt: record.receipt };
+        integrationMessages.set(ledger.messageId, ledger);
+        integrationCorrelations.set(ledger.correlationId, ledger);
+        lastReceiptDigest = digestJson(record.receipt);
+      } else if (record.type === "integration-ledger" && record.receipt) {
+        const ledger = { messageId: record.message_id, correlationId: record.correlation_id, payloadDigest: record.payload_digest, capabilityId: record.capability_id, action: record.action, jobId: record.job_id, receipt: record.receipt };
+        integrationMessages.set(ledger.messageId, ledger);
+        integrationCorrelations.set(ledger.correlationId, ledger);
+        lastReceiptDigest = digestJson(record.receipt);
       } else {
         throw new Error("coordinator journal contains an unknown record");
       }
@@ -164,9 +188,16 @@ export function createServer({
     const runnerSnapshot = new Map(runnerJobs);
     if (currentRecord.type === "job") jobSnapshot.set(currentRecord.job.id, currentRecord.job);
     else if (currentRecord.type === "runner-job") runnerSnapshot.set(currentRecord.job.id, currentRecord.job);
+    const ledgerSnapshot = new Map(integrationMessages);
+    if (currentRecord.type === "integration-enqueue" && currentRecord.receipt) {
+      const ledger = { messageId: currentRecord.message_id, correlationId: currentRecord.correlation_id, payloadDigest: currentRecord.payload_digest, capabilityId: currentRecord.capability_id, action: currentRecord.action, jobId: currentRecord.job.id, receipt: currentRecord.receipt };
+      ledgerSnapshot.set(ledger.messageId, ledger);
+      jobSnapshot.set(currentRecord.job.id, currentRecord.job);
+    }
     const snapshot = [
       ...[...jobSnapshot.values()].map((job) => ({ type: "job", job })),
       ...[...runnerSnapshot.values()].map((job) => ({ type: "runner-job", job })),
+      ...[...ledgerSnapshot.values()].map((ledger) => ({ type: "integration-ledger", message_id: ledger.messageId, correlation_id: ledger.correlationId, payload_digest: ledger.payloadDigest, capability_id: ledger.capabilityId, action: ledger.action, job_id: ledger.jobId, receipt: ledger.receipt })),
     ];
     const handle = await fs.promises.open(compactPath, "w", 0o600);
     try {
@@ -235,6 +266,39 @@ export function createServer({
           if (typeof credential !== "string" || credential.length < 32) return json(res, 503, { error: `${label} authentication is not configured` });
           if (!authorized(req, credential)) return json(res, 401, { error: `unauthorized ${label} client` });
         }
+      }
+      if (req.method === "POST" && url.pathname === "/api/integration/enqueue") {
+        if (!avroneIssuerPublicKeyPem || !capabilityAuthorityPublicKeyB64 || !swarmReceiptPrivateKeyPem || !avroneIssuer || !swarmAudience) {
+          return json(res, 503, { error: "signed integration trust roots and receipt signing key are not configured" });
+        }
+        const payload = await readJson(req);
+        const action = payload.action;
+        const actionKey = action && String(action.type) + ":" + String(action.resource) + ":" + String(action.method);
+        const outcome = await serializeMutation(async () => {
+          const existingMessage = integrationMessages.get(payload.envelope?.message_id);
+          const existingCorrelation = integrationCorrelations.get(payload.envelope?.correlation_id);
+          const commit = async ({ objective, receipt }) => {
+            const existing = existingMessage || existingCorrelation;
+            if (existing) {
+              const same = existingMessage === existing && existingCorrelation === existing
+                && existing.payloadDigest === payload.envelope.payload_digest
+                && existing.capabilityId === payload.capability?.id && existing.action === actionKey;
+              if (!same) { const conflict = new Error("message_id or correlation_id replay conflict"); conflict.status = 409; throw conflict; }
+              return { job: jobs.get(existing.jobId), receipt: existing.receipt, idempotent_replay: true };
+            }
+            const id = "job-" + seq++;
+            const job = { id, tenant, objective, status: "queued", chain: [...ROLES], step: 0, createdAt: new Date().toISOString(), events: [] };
+            const record = { type: "integration-enqueue", job, message_id: payload.envelope.message_id, correlation_id: payload.envelope.correlation_id, payload_digest: payload.envelope.payload_digest, capability_id: payload.capability.id, action: actionKey, receipt };
+            await persist(record);
+            const ledger = { messageId: record.message_id, correlationId: record.correlation_id, payloadDigest: record.payload_digest, capabilityId: record.capability_id, action: record.action, jobId: job.id, receipt };
+            jobs.set(job.id, job); integrationMessages.set(ledger.messageId, ledger); integrationCorrelations.set(ledger.correlationId, ledger);
+            lastReceiptDigest = digestJson(receipt);
+            return { job, durable: true, idempotent_replay: false };
+          };
+          const result = await authorizeAndEnqueue({ request: payload, trust: { avroneIssuerPublicKeyPem, avroneIssuer, swarmAudience, capabilityAuthorityPublicKeyB64, capabilityAuthorityIssuer, swarmReceiptPrivateKeyPem }, previousReceiptDigest: lastReceiptDigest, commit });
+          return { status: result.idempotent_replay ? 200 : 202, body: result };
+        });
+        return json(res, outcome.status, outcome.body);
       }
       if (req.method === "GET" && url.pathname === "/api/jobs") return json(res, 200, { jobs: [...jobs.values()] });
       if (req.method === "POST" && url.pathname === "/api/jobs") {
