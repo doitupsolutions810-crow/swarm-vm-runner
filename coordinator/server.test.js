@@ -407,6 +407,76 @@ test("runner completion requires owning runner, boolean outcome and active state
   assert.equal((await request("/api/runner/complete", { method: "POST", body: { id: job.id, runner: "worker-a", claimToken: job.claimToken, ok: true } })).status, 409);
 });
 
+test("runner status listing never exposes a live claim token", async () => {
+  const queued = await request("/api/runner/jobs", {
+    method: "POST", body: { kind: "inventory", objective: "do not leak lease credentials" },
+  });
+  const claimed = await request("/api/runner/claim", {
+    method: "POST", body: { runner: "worker-secret-owner" },
+  });
+  assert.equal(claimed.status, 200);
+  assert.equal(claimed.body.id, queued.body.id);
+  assert.equal(typeof claimed.body.claimToken, "string");
+  const listed = await request("/api/runner/jobs");
+  const visible = listed.body.jobs.find((item) => item.id === queued.body.id);
+  assert.ok(visible);
+  assert.equal("claimToken" in visible, false);
+  assert.equal(visible.runner, "worker-secret-owner");
+});
+
+test("expired runner lease cannot complete before reclamation and stale token stays fenced", async () => {
+  let clock = Date.now();
+  const isolated = await start(
+    TOKEN, ROLE_TOKENS, READ_TOKEN, RUNNER_TOKEN,
+    fs.mkdtempSync(path.join(os.tmpdir(), "swarm-runner-lease-expiry-")),
+    500, { now: () => clock },
+  );
+  const previous = base;
+  base = isolated.base;
+  try {
+    const queued = await request("/api/runner/jobs", {
+      method: "POST", body: { kind: "inventory", objective: "lease must expire" },
+    });
+    const first = await request("/api/runner/claim", {
+      method: "POST", body: { runner: "worker-a" },
+    });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.id, queued.body.id);
+    assert.equal(first.body.leaseExpiresAt, clock + 30000);
+
+    clock += 30001;
+    const staleCompletion = await request("/api/runner/complete", {
+      method: "POST",
+      body: { id: first.body.id, runner: "worker-a", claimToken: first.body.claimToken, ok: true },
+    });
+    assert.equal(staleCompletion.status, 409);
+    assert.match(staleCompletion.body.error, /expired/);
+
+    const second = await request("/api/runner/claim", {
+      method: "POST", body: { runner: "worker-b" },
+    });
+    assert.equal(second.status, 200);
+    assert.equal(second.body.id, first.body.id);
+    assert.notEqual(second.body.claimToken, first.body.claimToken);
+
+    const staleAfterReclaim = await request("/api/runner/complete", {
+      method: "POST",
+      body: { id: second.body.id, runner: "worker-a", claimToken: first.body.claimToken, ok: true },
+    });
+    assert.equal(staleAfterReclaim.status, 403);
+
+    const currentCompletion = await request("/api/runner/complete", {
+      method: "POST",
+      body: { id: second.body.id, runner: "worker-b", claimToken: second.body.claimToken, ok: true },
+    });
+    assert.equal(currentCompletion.status, 200);
+    assert.equal(currentCompletion.body.status, "completed");
+  } finally {
+    base = previous;
+    await stop(isolated.instance);
+  }
+});
+
 test("search is authenticated and query length is bounded", async () => {
   assert.equal((await request("/api/search?q=xy", { token: null })).status, 401);
   assert.equal((await request(`/api/search?q=${"x".repeat(81)}`)).status, 400);
