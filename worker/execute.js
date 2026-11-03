@@ -37,6 +37,7 @@ export async function executeRoleTask({
   let result;
   try { result = await executionResponse.json(); }
   catch { return { reported: false, pending: true, reason: "executor returned non-JSON response" }; }
+  if (executionResponse.status === 429) return { reported: false, pending: true, retryable: true, reason: "executor capacity reached" };
   if (![200, 422].includes(executionResponse.status)) return { reported: false, pending: true, reason: "executor unavailable (" + executionResponse.status + ")" };
   if (!result?.evidence || typeof result.evidence_signature !== "string"
       || result.evidence.job_id !== job.id || result.evidence.role !== role
