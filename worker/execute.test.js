@@ -126,3 +126,54 @@ test("short credentials are rejected before any network call", async () => {
   await assert.rejects(() => executeRoleTask({ job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok", readToken: "short", roleToken: tokens.roleToken, executorToken: tokens.executorToken, fetchImpl: async () => { calls += 1; } }), /at least 32 characters/);
   assert.equal(calls, 0);
 });
+
+
+test("uses configured executor and coordinator timeout values", async () => {
+  const originalTimeout = AbortSignal.timeout;
+  const observed = [];
+  const calls = [];
+  try {
+    AbortSignal.timeout = (milliseconds) => {
+      observed.push(milliseconds);
+      return originalTimeout(60_000);
+    };
+    const fetchImpl = async (url, opts) => {
+      calls.push({ url, opts });
+      return calls.length === 1 ? { status: 200, json: async () => good } : { ok: true, status: 200 };
+    };
+    const out = await executeRoleTask({
+      job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
+      ...tokens, fetchImpl, executorTimeoutMs: 47_000, coordinatorTimeoutMs: 8_500,
+    });
+    assert.equal(out.reported, true);
+    assert.deepEqual(observed, [47_000, 8_500]);
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+});
+
+test("rejects invalid or unsafe timeout values before making network calls", async () => {
+  const invalid = [0, -1, 1.5, NaN, Infinity, "1000", 2_147_483_648, null];
+  for (const value of invalid) {
+    let calls = 0;
+    await assert.rejects(
+      () => executeRoleTask({
+        job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
+        ...tokens, fetchImpl: async () => { calls += 1; },
+        executorTimeoutMs: value,
+      }),
+      /executorTimeoutMs must be an integer/,
+    );
+    assert.equal(calls, 0, "invalid timeout must fail before network I/O");
+  }
+  let calls = 0;
+  await assert.rejects(
+    () => executeRoleTask({
+      job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
+      ...tokens, fetchImpl: async () => { calls += 1; },
+      coordinatorTimeoutMs: 0,
+    }),
+    /coordinatorTimeoutMs must be an integer/,
+  );
+  assert.equal(calls, 0);
+});
