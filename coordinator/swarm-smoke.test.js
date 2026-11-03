@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign, createHash } from "node:crypto";
 import { canonicalJson } from "./integration-contract.js";
-import { buildSmokeObjective, smokeArtifactPaths, smokeArtifactExpectations, validateCompletedJob } from "./swarm-smoke.js";
+import { buildSmokeObjective, smokeArtifactPaths, smokeArtifactExpectations, smokeCoordinatorToken, boundedInteger, validateCompletedJob } from "./swarm-smoke.js";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
@@ -60,6 +60,14 @@ test("smoke objective creates a bounded, non-destructive, executable four-role t
   assert.match(objective, /node --test swarm-smoke-smoke-abc123\.test\.js/);
   assert.match(objective, /Do not commit, push, publish/);
   assert.match(objective, /Governance: independently inspect/);
+  assert.ok(objective.length <= 2000);
+  assert.equal(smokeCoordinatorToken({ SWARM_API_TOKEN: "compose-api-token" }), "compose-api-token");
+  assert.equal(smokeCoordinatorToken({ SWARM_TOKEN: "legacy-token" }), "legacy-token");
+  assert.equal(smokeCoordinatorToken({}), "");
+  assert.equal(boundedInteger("900000", 900000, 60000, 3600000), 900000);
+  assert.equal(boundedInteger("-1", 900000, 60000, 3600000), 60000);
+  assert.equal(boundedInteger("99999999", 900000, 60000, 3600000), 3600000);
+  assert.equal(boundedInteger("NaN", 900000, 60000, 3600000), 900000);
   assert.throws(() => buildSmokeObjective("../escape", "https://github.com/example/repo.git"), /run tag/);
   assert.throws(() => buildSmokeObjective("smoke-1", "file:\/\/etc\/passwd"), /HTTPS Git URL/);
 });
