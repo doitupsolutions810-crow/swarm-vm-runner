@@ -1,4 +1,6 @@
 import test, { before, after, beforeEach } from "node:test";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { createServer } from "./server.js";
 
@@ -190,6 +192,29 @@ test("all four ordered roles are required before a job completes", async () => {
   assert.equal(final.status, "completed");
   assert.equal(final.events.length, 4);
   assert.equal((await event("governance", { jobId: job.id, status: "passed" })).status, 409);
+});
+
+test("stub worker reports failure instead of falsely passing unexecuted work", async () => {
+  const job = await createJob("prove worker executor is absent");
+  const workerPath = fileURLToPath(new URL("../worker/worker.js", import.meta.url));
+  const child = spawn(process.execPath, [workerPath], {
+    env: { ...process.env, ROLE: "debugger", COORDINATOR_URL: base, SWARM_READ_TOKEN: READ_TOKEN, SWARM_ROLE_TOKEN: ROLE_TOKENS.debugger },
+    stdio: "ignore",
+  });
+  try {
+    let current;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      current = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
+      if (current?.status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(current?.status, "failed");
+    assert.match(current.events[0].note, /no task was executed/);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+  }
 });
 
 test("runner jobs are allowlisted and claims are single-owner", async () => {
