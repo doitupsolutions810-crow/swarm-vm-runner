@@ -1,4 +1,7 @@
-export async function executeRoleTask({ job, role, coordinatorUrl, executorUrl, readToken, roleToken, executorToken, fetchImpl = fetch }) {
+export async function executeRoleTask({
+  job, role, coordinatorUrl, executorUrl, readToken, roleToken, executorToken,
+  fetchImpl = fetch, executorTimeoutMs = 300000, coordinatorTimeoutMs = 15000,
+}) {
   if (!job || typeof job.id !== "string" || typeof job.objective !== "string") throw new Error("invalid coordinator job");
   if (!["debugger", "coder", "tester", "governance"].includes(role)) throw new Error("invalid specialist role");
   for (const [name, value] of Object.entries({ readToken, roleToken, executorToken })) {
