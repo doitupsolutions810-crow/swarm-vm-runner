@@ -72,7 +72,17 @@ function validObjective(value) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_OBJECTIVE;
 }
 
-export function createServer({ token = process.env.SWARM_API_TOKEN, tenant = TENANT, redis = createClient(process.env.REDIS_URL || "redis://redis:6379") } = {}) {
+export function createServer({
+  token = process.env.SWARM_API_TOKEN,
+  roleTokens = {
+    debugger: process.env.SWARM_DEBUGGER_TOKEN,
+    coder: process.env.SWARM_CODER_TOKEN,
+    tester: process.env.SWARM_TESTER_TOKEN,
+    governance: process.env.SWARM_GOVERNANCE_TOKEN,
+  },
+  tenant = TENANT,
+  redis = createClient(process.env.REDIS_URL || "redis://redis:6379"),
+} = {}) {
   const jobs = new Map();
   const runnerJobs = new Map();
   const runnerQueue = [];
@@ -94,8 +104,18 @@ export function createServer({ token = process.env.SWARM_API_TOKEN, tenant = TEN
         return json(res, 200, { ok: true, tenant, jobs: jobs.size, runnerJobs: runnerJobs.size, runnerQueued: runnerQueue.length, roles: ROLES, redis: redis.ok });
       }
       if (url.pathname.startsWith("/api/")) {
-        if (typeof token !== "string" || token.length < 32) return json(res, 503, { error: "coordinator authentication is not configured" });
-        if (!authorized(req, token)) return json(res, 401, { error: "unauthorized" });
+        if (req.method === "POST" && url.pathname === "/api/events") {
+          if (typeof token !== "string" || token.length < 32) return json(res, 503, { error: "coordinator authentication is not configured" });
+          const payload = await readJson(req);
+          if (!ROLES.includes(payload.role)) return json(res, 400, { error: "unknown worker role" });
+          const roleToken = roleTokens?.[payload.role];
+          if (typeof roleToken !== "string" || roleToken.length < 32) return json(res, 503, { error: "role authentication is not configured" });
+          if (!authorized(req, roleToken)) return json(res, 401, { error: "unauthorized worker role" });
+          req.swarmPayload = payload;
+        } else {
+          if (typeof token !== "string" || token.length < 32) return json(res, 503, { error: "coordinator authentication is not configured" });
+          if (!authorized(req, token)) return json(res, 401, { error: "unauthorized" });
+        }
       }
       if (req.method === "GET" && url.pathname === "/api/jobs") return json(res, 200, { jobs: [...jobs.values()] });
       if (req.method === "POST" && url.pathname === "/api/jobs") {
@@ -117,7 +137,7 @@ export function createServer({ token = process.env.SWARM_API_TOKEN, tenant = TEN
         });
       }
       if (req.method === "POST" && url.pathname === "/api/events") {
-        const payload = await readJson(req);
+        const payload = req.swarmPayload || await readJson(req);
         const job = jobs.get(payload.jobId);
         if (!job) return json(res, 404, { error: "unknown job" });
         if (job.status === "completed" || job.status === "failed") return json(res, 409, { error: "job is terminal" });
