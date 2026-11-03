@@ -182,16 +182,23 @@ test("concurrent duplicate role reports have exactly one winner", async () => {
     event("debugger", { jobId: job.id, status: "passed", note: "first" }),
     event("debugger", { jobId: job.id, status: "passed", note: "second" }),
   ]);
-  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  const statuses = results.map((result) => result.status);
+  assert.equal(statuses.filter(status => status === 200).length, 1);
+  assert.ok(statuses.every(status => status === 200 || status === 403 || status === 409));
   const stored = (await request("/api/jobs")).body.jobs.find((item) => item.id === job.id);
   assert.equal(stored.events.filter((item) => item.role === "debugger").length, 1);
 });
 
 test("worker role cannot pass a job with missing or mismatched Grok Bot evidence", async () => {
   const job = await createJob("signed evidence boundary");
+  const claim = await request("/api/worker/debugger/claim", {
+    method: "POST", body: { workerId: "evidence-worker", leaseMs: 30000 }, token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(claim.status, 200);
+  const claimFields = { claimToken: claim.body.claimToken, workerId: claim.body.lease.workerId };
   const missing = await request("/api/events", {
     method: "POST",
-    body: { jobId: job.id, role: "debugger", status: "passed" },
+    body: { jobId: job.id, role: "debugger", status: "passed", ...claimFields },
     token: ROLE_TOKENS.debugger,
   });
   assert.equal(missing.status, 403);
@@ -199,7 +206,7 @@ test("worker role cannot pass a job with missing or mismatched Grok Bot evidence
   const mismatched = { ...signed.evidence, job_id: "job-forged" };
   const rejected = await request("/api/events", {
     method: "POST",
-    body: { jobId: job.id, role: "debugger", status: "passed", evidence: mismatched, evidence_signature: signed.evidence_signature },
+    body: { jobId: job.id, role: "debugger", status: "passed", evidence: mismatched, evidence_signature: signed.evidence_signature, ...claimFields },
     token: ROLE_TOKENS.debugger,
   });
   assert.equal(rejected.status, 403);
