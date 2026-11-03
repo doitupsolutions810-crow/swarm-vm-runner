@@ -42,7 +42,7 @@ jobs:
           node-version: "22"
       - name: Syntax check
         working-directory: coordinator
-        run: node --check server.js && node --check server.test.js && node --check integration-contract.js && node --check integration-adapter.js && node --check integration-server.test.js && node --check swarm-executor.integration.test.js
+        run: node --check server.js && node --check server.test.js && node --check integration-contract.js && node --check integration-adapter.js && node --check integration-server.test.js && node --check swarm-executor.integration.test.js && node --check swarm-smoke.js && node --check swarm-smoke.test.js
       - name: Docker coordinator image build
         run: docker build -t swarm-coordinator-contract:${GITHUB_SHA} coordinator
       - name: Compose configuration validation
