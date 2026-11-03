@@ -182,6 +182,17 @@ test("rejects invalid or unsafe timeout values before making network calls", asy
 });
 
 
+test("executor capacity response is retryable without reporting evidence", async () => {
+  const out = await executeRoleTask({
+    job, role: "tester", coordinatorUrl: "http://coord", executorUrl: "http://grok",
+    ...tokens, workerId: "tester-worker", tenant: job.tenant, claimToken: "c".repeat(40),
+    fetchImpl: async () => ({ status: 429, json: async () => ({ error: "capacity" }) }),
+  });
+  assert.equal(out.reported, false);
+  assert.equal(out.pending, true);
+  assert.equal(out.retryable, true);
+});
+
 test("executor request forwards the active claim and role-scoped coordinator credential", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
