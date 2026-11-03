@@ -535,7 +535,7 @@ export function createServer({
         const payload = await readJson(req);
         if (typeof payload.runner !== "string" || !/^[A-Za-z0-9_.-]{1,80}$/.test(payload.runner)) return json(res, 400, { error: "valid runner name required" });
         const outcome = await serializeMutation(async () => {
-          const now = Date.now();
+          const timestamp = now();
           for (const candidate of runnerJobs.values()) {
             const leaseExpiry = Number(candidate.leaseExpiresAt);
             if (candidate.status === "running" && (!Number.isFinite(leaseExpiry) || leaseExpiry <= timestamp)) {
