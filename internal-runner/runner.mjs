@@ -50,7 +50,7 @@ function validateCoordinatorUrl(raw) {
       || parsed.search || parsed.hash) {
     throw new TypeError("COORDINATOR_URL must be an HTTP(S) URL without credentials, query, or fragment");
   }
-  return parsed.toString().replace(/\\/+$/, "");
+  return parsed.toString().replace(/\/+$/, "");
 }
 
 export function walkHits(dir, needle, acc = [], {
@@ -73,7 +73,7 @@ export function walkHits(dir, needle, acc = [], {
     } else if (ent.isFile()) {
       const rel = pathImpl.relative(root, full);
       let hit = rel.toLowerCase().includes(needle.toLowerCase());
-      if (!hit && /\\.(js|mjs|md|yml|json|sh|html|txt)$/i.test(ent.name)) {
+      if (!hit && /\.(js|mjs|md|yml|json|sh|html|txt)$/i.test(ent.name)) {
         try {
           if (!signal?.aborted) hit = fsImpl.readFileSync(full, "utf8").toLowerCase().includes(needle.toLowerCase());
         } catch { hit = false; }
