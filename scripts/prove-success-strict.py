@@ -10,9 +10,9 @@ import time
 import uuid
 from http.client import HTTPException
 from pathlib import Path
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError, HTTPRedirectHandler, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener
 
 from prove_success import (
     ProofError,
@@ -27,6 +27,16 @@ from prove_success import (
 
 REQUEST_TIMEOUT = 5
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """A coordinator redirect is not an accepted health or job response."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler)
 
 
 def request_json(base: str, path: str, method: str = "GET", payload=None):
@@ -65,7 +75,7 @@ def request_json(base: str, path: str, method: str = "GET", payload=None):
             method=method,
             headers={"content-type": "application/json"},
         )
-        with urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+        with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ProofError(f"{path} response exceeded {MAX_RESPONSE_BYTES} bytes")
