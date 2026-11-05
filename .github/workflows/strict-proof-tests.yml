@@ -1,0 +1,43 @@
+name: Strict Swarm Proof Tests
+
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "tests/**"
+      - ".github/workflows/strict-proof-tests.yml"
+  push:
+    branches:
+      - main
+      - "fix/strict-swarm-success-gates-2026-11-05"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof-tests:
+    name: proof-tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test runner
+        run: python -m pip install --upgrade pytest
+      - name: Compile proof code
+        run: python -m compileall -q scripts tests
+      - name: Run strict proof unit and mock-coordinator tests
+        run: >-
+          python -m pytest -q
+          tests/test_prove_success.py
+          tests/test_prove_success_integration.py
+          tests/test_prove_success_hardening.py
