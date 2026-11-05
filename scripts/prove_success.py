@@ -1,8 +1,7 @@
+"""Strict, bounded acceptance checks for the Swarm VM coordinator."""
 from __future__ import annotations
 
 import unicodedata
-
-"""Strict, bounded acceptance checks for the Swarm VM coordinator."""
 
 REQUIRED_SERVICES = frozenset({
     "redis", "coordinator", "worker-debugger", "worker-coder",
@@ -61,7 +60,12 @@ def parse_wait_seconds(raw: str | None) -> int:
     """Parse an explicit, bounded proof wait; the default remains 120 seconds."""
     if raw is None or raw == "":
         return DEFAULT_WAIT_SECONDS
-    if not isinstance(raw, str) or not raw.isascii() or not raw.isdecimal():
+    if (
+        not isinstance(raw, str)
+        or len(raw) > 3
+        or not raw.isascii()
+        or not raw.isdecimal()
+    ):
         raise ProofError("PROVE_SUCCESS_WAIT_SECONDS must be an integer from 1 to 600")
     value = int(raw)
     if not 1 <= value <= MAX_WAIT_SECONDS:
