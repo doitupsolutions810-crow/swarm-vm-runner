@@ -10,9 +10,9 @@ import time
 import uuid
 from http.client import HTTPException
 from pathlib import Path
-from urllib.error import HTTPError, HTTPRedirectHandler, URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from prove_success import (
     ProofError,
