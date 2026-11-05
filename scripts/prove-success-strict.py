@@ -49,7 +49,12 @@ def request_json(base: str, path: str, method: str = "GET", payload=None):
         raise ProofError(
             "COORDINATOR_URL must be an absolute HTTP(S) URL without credentials, query, or fragment"
         )
-    if not isinstance(path, str) or not path.startswith("/") or "://" in path:
+    if (
+        not isinstance(path, str)
+        or not path.startswith("/")
+        or path.startswith("//")
+        or "://" in path
+    ):
         raise ProofError("coordinator path must be an absolute local API path")
 
     try:
