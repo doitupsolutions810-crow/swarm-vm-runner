@@ -81,8 +81,11 @@ def request_json(base: str, path: str, method: str = "GET", payload=None):
                 raise ProofError(f"{path} response exceeded {MAX_RESPONSE_BYTES} bytes")
             return response.status, json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
-        detail = exc.read(2048).decode("utf-8", "replace")
-        raise ProofError(f"{path} returned HTTP {exc.code}: {detail}") from exc
+        try:
+            detail = exc.read(2048).decode("utf-8", "replace")
+        finally:
+            exc.close()
+        raise ProofError(f"{path} returned HTTP {exc.code}: {detail}") from None
     except (URLError, TimeoutError, OSError, ValueError, UnicodeError, HTTPException) as exc:
         raise ProofError(f"{path} unavailable or invalid: {exc}") from exc
 
