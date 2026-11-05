@@ -78,6 +78,11 @@ def response_server():
                 body, status = b"x" * (2 * 1024 * 1024 + 1), 200
             elif self.path == "/unavailable":
                 body, status = b'{"error":"offline"}', 503
+            elif self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("location", "/json")
+                self.end_headers()
+                return
             else:
                 body, status = b'{"error":"not found"}', 404
             self.send_response(status)
@@ -101,7 +106,9 @@ def test_request_returns_decoded_json_for_success(response_server):
     assert strict_proof.request_json(response_server, "/json") == (200, {"ok": True})
 
 
-@pytest.mark.parametrize("path", ["/invalid-json", "/invalid-utf8", "/too-large", "/unavailable"])
-def test_request_normalizes_malformed_oversized_and_http_error_responses(response_server, path):
+@pytest.mark.parametrize("path", [
+    "/invalid-json", "/invalid-utf8", "/too-large", "/unavailable", "/redirect"
+])
+def test_request_normalizes_malformed_oversized_http_and_redirect_responses(response_server, path):
     with pytest.raises(StrictProofError):
         strict_proof.request_json(response_server, path)
