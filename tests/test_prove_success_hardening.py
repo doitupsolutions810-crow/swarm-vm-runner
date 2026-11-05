@@ -17,6 +17,7 @@ assert _spec is not None and _spec.loader is not None
 strict_proof = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = strict_proof
 _spec.loader.exec_module(strict_proof)
+StrictProofError = strict_proof.ProofError
 
 
 @pytest.mark.parametrize(("raw", "expected"), [(None, 120), ("", 120), ("1", 1), ("600", 600)])
@@ -24,7 +25,7 @@ def test_wait_parser_accepts_default_and_boundaries(raw, expected):
     assert parse_wait_seconds(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["0", "601", "-1", "+1", "1.5", "abc", "１２", " 1", "1 "])
+@pytest.mark.parametrize("raw", ["0", "601", "-1", "+1", "1.5", "abc", "１２", " 1", "1 ", "9" * 4096])
 def test_wait_parser_rejects_unbounded_or_noncanonical_values(raw):
     with pytest.raises(ProofError):
         parse_wait_seconds(raw)
@@ -50,13 +51,13 @@ def test_job_id_rejects_empty_unbounded_or_spoofed_values(job_id):
     "http://localhost/#fragment", "http://localhost:bad", "http://[bad",
 ])
 def test_request_rejects_unsafe_or_malformed_coordinator_urls(url):
-    with pytest.raises(ProofError):
+    with pytest.raises(StrictProofError):
         strict_proof.request_json(url, "/health")
 
 
 @pytest.mark.parametrize("path", ["health", "https://elsewhere.invalid/x", "//elsewhere.invalid/x"])
 def test_request_rejects_nonlocal_api_paths(path):
-    with pytest.raises(ProofError):
+    with pytest.raises(StrictProofError):
         strict_proof.request_json("http://127.0.0.1:1", path)
 
 
@@ -102,5 +103,5 @@ def test_request_returns_decoded_json_for_success(response_server):
 
 @pytest.mark.parametrize("path", ["/invalid-json", "/invalid-utf8", "/too-large", "/unavailable"])
 def test_request_normalizes_malformed_oversized_and_http_error_responses(response_server, path):
-    with pytest.raises(ProofError):
+    with pytest.raises(StrictProofError):
         strict_proof.request_json(response_server, path)
