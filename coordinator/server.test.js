@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { createServer } from "./server.js";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { canonicalJson } from "./integration-contract.js";
+import { canonicalJson, digestJson } from "./integration-contract.js";
 
 const TOKEN = "test-token-0123456789abcdef0123456789abcdef";
 const READ_TOKEN = "read-token-0123456789abcdef0123456789abcdef";
@@ -684,6 +684,77 @@ test("concurrent and post-restart job idempotency creates one durable child", as
     base = previous;
     await stop(isolated.instance);
     fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("coordinator fails closed on incomplete, malformed, or conflicting job idempotency journal records", () => {
+  const baseJob = {
+    id: "job-1",
+    tenant: "test-tenant",
+    objective: "recover exactly one child",
+    status: "queued",
+    chain: ["debugger", "coder", "tester", "governance"],
+    step: 0,
+    createdAt: new Date().toISOString(),
+    events: [],
+  };
+  const digestFor = job => digestJson({ tenant: job.tenant, objective: job.objective.trim() });
+  const makeRecord = job => ({ type: "job", job });
+  const valid = {
+    ...baseJob,
+    idempotencyKey: "spawn:run-1",
+    idempotencyDigest: digestFor(baseJob),
+  };
+  const secondJob = {
+    ...baseJob,
+    id: "job-2",
+    objective: "a different durable child",
+    idempotencyKey: valid.idempotencyKey,
+    idempotencyDigest: digestFor({ ...baseJob, objective: "a different durable child" }),
+  };
+  const invalidJournals = [
+    {
+      records: [makeRecord({ ...baseJob, idempotencyKey: "spawn:run-1" })],
+      error: /incomplete job idempotency metadata/,
+    },
+    {
+      records: [makeRecord({ ...baseJob, idempotencyKey: "bad/key", idempotencyDigest: digestFor(baseJob) })],
+      error: /invalid job idempotency metadata/,
+    },
+    {
+      records: [makeRecord({ ...baseJob, idempotencyKey: "spawn:run-1", idempotencyDigest: "not-a-digest" })],
+      error: /invalid job idempotency metadata/,
+    },
+    {
+      records: [makeRecord({ ...baseJob, idempotencyKey: "spawn:run-1", idempotencyDigest: "sha256:" + "a".repeat(64) })],
+      error: /invalid job idempotency metadata/,
+    },
+    {
+      records: [makeRecord(valid), makeRecord(secondJob)],
+      error: /conflicting job idempotency records/,
+    },
+  ];
+
+  for (const fixture of invalidJournals) {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-corrupt-idempotency-"));
+    try {
+      fs.writeFileSync(
+        path.join(stateDir, "coordinator.jsonl"),
+        fixture.records.map(record => JSON.stringify(record)).join("\n") + "\n",
+      );
+      assert.throws(() => createServer({
+        token: TOKEN,
+        readToken: READ_TOKEN,
+        runnerToken: RUNNER_TOKEN,
+        roleTokens: ROLE_TOKENS,
+        tenant: "test-tenant",
+        stateDir,
+        executorPublicKeyPem: EXECUTOR_PUBLIC_KEY_PEM,
+        executorId: EXECUTOR_ID,
+      }), fixture.error);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   }
 });
 
