@@ -629,6 +629,26 @@ test("job idempotency returns the same job, rejects changed objectives, and hide
   assert.ok(visible);
   assert.equal("idempotencyKey" in visible, false);
   assert.equal("idempotencyDigest" in visible, false);
+
+  const claim = await request("/api/worker/debugger/claim", {
+    method: "POST",
+    body: { workerId: "worker-idempotency-redaction" },
+    token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(claim.status, 200);
+  const signed = signedRoleEvidence("debugger", { jobId: first.body.id, status: "passed" });
+  const event = await request("/api/events", {
+    method: "POST",
+    body: {
+      jobId: first.body.id, role: "debugger", status: "passed", ...signed,
+      tenant: claim.body.tenant, claimToken: claim.body.claimToken,
+      workerId: claim.body.lease.workerId,
+    },
+    token: ROLE_TOKENS.debugger,
+  });
+  assert.equal(event.status, 200);
+  assert.equal("idempotencyKey" in event.body, false);
+  assert.equal("idempotencyDigest" in event.body, false);
 });
 
 test("concurrent and post-restart job idempotency creates one durable child", async () => {
