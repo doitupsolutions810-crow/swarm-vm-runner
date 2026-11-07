@@ -279,6 +279,54 @@ test("spawn-subagent retries reuse one stable idempotency key after an ambiguous
   }
 });
 
+test("ambiguous child creation keeps parent retryable and reconciles the same idempotency key", async () => {
+  const spawnKeys = [];
+  const children = new Map();
+  let completionCount = 0;
+  let claimCount = 0;
+  const fetchImpl = async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === "/api/runner/claim") {
+      claimCount += 1;
+      return jsonResponse(200, claimedJob("spawn-subagent"));
+    }
+    if (parsed.pathname === "/api/jobs") {
+      const key = options.headers["idempotency-key"];
+      spawnKeys.push(key);
+      if (!children.has(key)) {
+        children.set(key, { id: "job-901", chain: ["debugger", "coder", "tester", "governance"] });
+        // Simulate: coordinator committed the child, but the response was lost.
+        throw new Error("socket reset after coordinator commit");
+      }
+      return jsonResponse(200, { ...children.get(key), idempotent_replay: true });
+    }
+    if (parsed.pathname === "/api/runner/complete") {
+      completionCount += 1;
+      return jsonResponse(200, { id: "run-123", status: "completed" });
+    }
+    throw new Error("unexpected runner request: " + parsed.pathname);
+  };
+  const runner = createInternalRunner({ env: env(), fetchImpl, logger: { log() {}, warn() {}, error() {} } });
+  try {
+    const first = await runner.tick();
+    assert.equal(first.retryable, true);
+    assert.equal(first.completed, false);
+    assert.equal(completionCount, 0);
+    assert.equal(children.size, 1);
+
+    const second = await runner.tick();
+    assert.equal(second.status, "completed");
+    assert.equal(claimCount, 2);
+    assert.equal(spawnKeys.length, 2);
+    assert.equal(spawnKeys[0], "spawn:run-123");
+    assert.equal(spawnKeys[1], spawnKeys[0]);
+    assert.equal(children.size, 1);
+    assert.equal(completionCount, 1);
+  } finally {
+    runner.stop();
+  }
+});
+
 test("shutdown during a pending claim cannot start work after claim resolves", async () => {
   let resolveClaim;
   let claimStarted = false;
