@@ -62,8 +62,10 @@ half the lease duration. The host path selected by `SWARM_WORKSPACE_HOST_PATH`
 to search there rather than the image directory. It skips hidden folders,
 `.git`, secrets/credentials directories, private-key file types, and files over
 1 MiB, with traversal capped at 6 directory levels and 500 files per search.
-The runner container has a read-only root filesystem, a small no-exec `/tmp`,
-no Linux capabilities, and `no-new-privileges`. No host Docker socket is mounted.
+The runner container runs as an unprivileged numeric UID, has a read-only
+root filesystem, a small no-exec `/tmp`, no Linux capabilities, and
+`no-new-privileges`. It is limited to 64 processes, 256 MiB of memory, and one
+CPU. No host Docker socket is mounted.
 
 These controls harden the coordinator protocol; they do not make the optional
 GitHub Actions runner safe for untrusted pull-request code.
