@@ -1,0 +1,64 @@
+name: coordinator-contracts
+
+on:
+  push:
+    branches: ["main", "security/**"]
+    paths:
+      - "coordinator/**"
+      - "worker/**"
+      - "internal-runner/**"
+      - "scripts/prove-success.sh"
+      - "scripts/test-prove-success.sh"
+      - "docker-compose.yml"
+      - "docker-compose.swarm.yml"
+      - "docs/**"
+      - ".env.example"
+      - "SUCCESS_CRITERIA.md"
+      - ".github/workflows/coordinator-contracts.yml"
+  pull_request:
+    paths:
+      - "coordinator/**"
+      - "worker/**"
+      - "internal-runner/**"
+      - "scripts/prove-success.sh"
+      - "scripts/test-prove-success.sh"
+      - "docker-compose.yml"
+      - "docker-compose.swarm.yml"
+      - "docs/**"
+      - ".env.example"
+      - "SUCCESS_CRITERIA.md"
+      - ".github/workflows/coordinator-contracts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  node-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax check
+        working-directory: coordinator
+        run: node --check server.js && node --check server.test.js && node --check integration-contract.js && node --check integration-adapter.js && node --check integration-server.test.js && node --check swarm-executor.integration.test.js && node --check swarm-smoke.js && node --check swarm-smoke.test.js
+      - name: Docker coordinator image build
+        run: docker build -t swarm-coordinator-contract:${GITHUB_SHA} coordinator
+      - name: Compose configuration validation
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Coordinator and four-role smoke contract tests
+        run: npm --prefix coordinator test
+      - name: Worker syntax and bridge tests
+        run: node --check worker/worker.js && node --check worker/execute.js && node --test worker/execute.test.js
+      - name: Internal runner syntax, lease heartbeat, and replay tests
+        run: node --check internal-runner/runner.mjs && node --check internal-runner/runner.test.mjs && node --test internal-runner/runner.test.mjs
+      - name: Shell syntax check
+        run: bash -n scripts/prove-success.sh && bash -n scripts/test-prove-success.sh
+      - name: Proof script negative tests
+        run: ./scripts/test-prove-success.sh
+      - name: Adversarial coordinator contracts
+        working-directory: coordinator
+        run: npm test

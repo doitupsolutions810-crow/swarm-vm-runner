@@ -3,5 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "server.js"
+  "main": "server.js",
+  "scripts": {
+    "test": "node --test server.test.js integration-contract.test.js integration-adapter.test.js integration-server.test.js swarm-executor.integration.test.js swarm-smoke.test.js",
+    "smoke:swarm": "node swarm-smoke.js"
+  }
 }

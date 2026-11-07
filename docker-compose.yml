@@ -1,31 +1,39 @@
 name: swarm-vm
 
 services:
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   coordinator:
     build:
       context: ./coordinator
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       SWARM_TENANT: ${SWARM_TENANT:-control12}
+      SWARM_STATE_DIR: /var/swarm
+      SWARM_COMPACT_AFTER_RECORDS: ${SWARM_COMPACT_AFTER_RECORDS:-500}
+      SWARM_AVRONE_ISSUER_PUBLIC_KEY_FILE: ${SWARM_AVRONE_ISSUER_PUBLIC_KEY_FILE:-}
+      SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64: ${SWARM_CAPABILITY_AUTHORITY_PUBLIC_KEY_B64:-}
+      SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE: ${SWARM_RECEIPT_SIGNING_PRIVATE_KEY_FILE:-}
+      SWARM_EXECUTOR_PUBLIC_KEY_FILE: ${SWARM_EXECUTOR_PUBLIC_KEY_FILE:-}
+      SWARM_EXECUTOR_ID: ${SWARM_EXECUTOR_ID:-spiffe://prod/agent/grok-bot}
+      SWARM_SMOKE_REPOSITORY: ${SWARM_SMOKE_REPOSITORY:-}
+      SWARM_SMOKE_BRANCH: ${SWARM_SMOKE_BRANCH:-}
+      SWARM_AVRONE_ISSUER: ${SWARM_AVRONE_ISSUER:-}
+      SWARM_SERVICE_IDENTITY: ${SWARM_SERVICE_IDENTITY:-}
+      SWARM_CAPABILITY_AUTHORITY_ISSUER: ${SWARM_CAPABILITY_AUTHORITY_ISSUER:-spiffe://prod/broker}
+      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_RUNNER_TOKEN: ${SWARM_RUNNER_TOKEN}
+      SWARM_DEBUGGER_TOKEN: ${SWARM_DEBUGGER_TOKEN}
+      SWARM_CODER_TOKEN: ${SWARM_CODER_TOKEN}
+      SWARM_TESTER_TOKEN: ${SWARM_TESTER_TOKEN}
+      SWARM_GOVERNANCE_TOKEN: ${SWARM_GOVERNANCE_TOKEN}
       PRODUCTION: ${PRODUCTION:-0}
       PORT: 4100
     ports:
-      - "${COORDINATOR_PORT:-4100}:4100"
-    depends_on:
-      redis:
-        condition: service_healthy
+      - "${COORDINATOR_BIND_HOST:-127.0.0.1}:${COORDINATOR_PORT:-4100}:4100"
     volumes:
       - swarm-data:/var/swarm
+      - ./secrets:/run/secrets:ro
+    networks: [default, swarm-integration]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1))"]
       interval: 10s
@@ -36,9 +44,13 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: debugger
       SWARM_TENANT: ${SWARM_TENANT:-control12}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_ROLE_TOKEN: ${SWARM_DEBUGGER_TOKEN}
+      SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_DEBUGGER_TOKEN}
+    networks: [default, swarm-integration]
     depends_on:
       coordinator:
         condition: service_healthy
@@ -47,9 +59,13 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: coder
       SWARM_TENANT: ${SWARM_TENANT:-control12}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_ROLE_TOKEN: ${SWARM_CODER_TOKEN}
+      SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_CODER_TOKEN}
+    networks: [default, swarm-integration]
     depends_on:
       coordinator:
         condition: service_healthy
@@ -58,9 +74,13 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: tester
       SWARM_TENANT: ${SWARM_TENANT:-control12}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_ROLE_TOKEN: ${SWARM_TESTER_TOKEN}
+      SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_TESTER_TOKEN}
+    networks: [default, swarm-integration]
     depends_on:
       coordinator:
         condition: service_healthy
@@ -69,9 +89,13 @@ services:
     build: { context: ./worker }
     restart: unless-stopped
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ROLE: governance
       SWARM_TENANT: ${SWARM_TENANT:-control12}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_ROLE_TOKEN: ${SWARM_GOVERNANCE_TOKEN}
+      SWARM_EXECUTOR_URL: ${SWARM_EXECUTOR_URL:-http://grok-bot:3000/api/swarm/execute}
+      SWARM_EXECUTOR_TOKEN: ${SWARM_EXECUTOR_GOVERNANCE_TOKEN}
+    networks: [default, swarm-integration]
     depends_on:
       coordinator:
         condition: service_healthy
@@ -81,7 +105,26 @@ services:
     restart: unless-stopped
     environment:
       COORDINATOR_URL: http://coordinator:4100
+      SWARM_API_TOKEN: ${SWARM_API_TOKEN}
+      SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
+      SWARM_RUNNER_TOKEN: ${SWARM_RUNNER_TOKEN}
       INTERNAL_RUNNER_NAME: ${INTERNAL_RUNNER_NAME:-control12-internal-1}
+      SWARM_ROOT: /workspace
+      RUNNER_LEASE_MS: ${RUNNER_LEASE_MS:-30000}
+      RUNNER_HEARTBEAT_MS: ${RUNNER_HEARTBEAT_MS:-10000}
+      POLL_MS: ${POLL_MS:-3000}
+    volumes:
+      - ${SWARM_WORKSPACE_HOST_PATH:-.}:/workspace:ro
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1.0
     depends_on:
       coordinator:
         condition: service_healthy
@@ -91,7 +134,7 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "${CONTENT_PORT:-8088}:80"
+      - "${CONTENT_BIND_HOST:-127.0.0.1}:${CONTENT_PORT:-8088}:80"
     volumes:
       - swarm-data:/usr/share/nginx/html/artifacts:ro
       - ./content/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -127,3 +170,8 @@ services:
 
 volumes:
   swarm-data:
+
+networks:
+  swarm-integration:
+    external: true
+    name: ${SWARM_INTEGRATION_NETWORK:-swarm-integration}
