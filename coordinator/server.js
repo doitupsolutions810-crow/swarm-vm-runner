@@ -548,6 +548,10 @@ export function createServer({
           jobs.set(next.id, next);
           return { status: 200, body: next };
         });
+        if (outcome.status === 200 && outcome.body && typeof outcome.body === "object") {
+          const { idempotencyKey: _key, idempotencyDigest: _digest, ...visibleJob } = outcome.body;
+          return json(res, outcome.status, visibleJob);
+        }
         return json(res, outcome.status, outcome.body);
       }
       if (req.method === "GET" && url.pathname === "/api/runner/jobs") {
