@@ -224,18 +224,48 @@ export function createInternalRunner({
     const objective = String(job.objective || job.query || "spawned by internal runner").slice(0, 2000);
     // Stable across a coordinator timeout, process restart, and claim replay.
     const idempotencyKey = "spawn:" + job.id;
-    const res = await request(COORDINATOR + "/api/jobs", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + API_TOKEN,
-        "idempotency-key": idempotencyKey,
-      },
-      body: JSON.stringify({ objective }),
-      signal,
-    });
+    let res;
+    try {
+      res = await request(COORDINATOR + "/api/jobs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer " + API_TOKEN,
+          "idempotency-key": idempotencyKey,
+        },
+        body: JSON.stringify({ objective }),
+        signal,
+      });
+    } catch (error) {
+      // The coordinator may have committed the child before the response was lost.
+      // Do not fail the parent; let its lease expire and replay the same key.
+      return {
+        ok: false, retryable: true, pending: true,
+        note: "spawn outcome unknown; retry will reconcile the same idempotency key",
+      };
+    }
+    if ([408, 425, 429, 500, 502, 503, 504].includes(res.status)) {
+      return {
+        ok: false, retryable: true, pending: true,
+        note: "spawn temporarily unavailable (" + res.status + "); retry will reuse the idempotency key",
+      };
+    }
     if (![200, 202].includes(res.status)) return { ok: false, note: "spawn failed " + res.status };
-    const spawned = await res.json();
+    let spawned;
+    try {
+      spawned = await res.json();
+    } catch {
+      return {
+        ok: false, retryable: true, pending: true,
+        note: "spawn response was unreadable; retry will reconcile the same idempotency key",
+      };
+    }
+    if (!spawned || typeof spawned.id !== "string" || !/^job-[A-Za-z0-9_.:-]{1,128}$/.test(spawned.id)) {
+      return {
+        ok: false, retryable: true, pending: true,
+        note: "spawn response lacked a valid job identity; retry will reconcile the same idempotency key",
+      };
+    }
     return {
       ok: true,
       note: NAME + " spawned " + spawned.id + " chain=" + (spawned.chain || []).join(">"),
@@ -312,6 +342,10 @@ export function createInternalRunner({
       if (heartbeat.leaseLost()) {
         logger.warn(NAME, job.id, "task result discarded because the runner lease was lost");
         return { leaseLost: true, completed: false };
+      }
+      if (result?.retryable === true) {
+        logger.warn(NAME, job.id, "task deferred; the claim will expire and be retried idempotently");
+        return { retryable: true, pending: true, completed: false };
       }
       if (taskController.signal.aborted) {
         result = { ok: false, note: "runner task cancelled before completion" };
