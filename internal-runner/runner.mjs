@@ -114,7 +114,9 @@ export function createInternalRunner({
   }
 
   let tickRunning = false;
+  let stopped = false;
   let interval = null;
+  let activeClaimController = null;
   let activeTaskController = null;
   let activeHeartbeatController = null;
 
@@ -124,7 +126,7 @@ export function createInternalRunner({
     return fetchImpl(url, { ...options, signal });
   }
 
-  async function claim() {
+  async function claim(signal) {
     const res = await request(COORDINATOR + "/api/runner/claim", {
       method: "POST",
       headers: {
@@ -132,6 +134,7 @@ export function createInternalRunner({
         authorization: "Bearer " + RUNNER_TOKEN,
       },
       body: JSON.stringify({ runner: NAME, leaseMs }),
+      signal,
     });
     if (res.status === 204) return null;
     if (!res.ok) throw new Error("claim " + res.status);
@@ -276,10 +279,14 @@ export function createInternalRunner({
   }
 
   async function tick() {
+    if (stopped) return { stopped: true, reason: "runner is stopped" };
     if (tickRunning) return { skipped: true, reason: "runner tick already active" };
     tickRunning = true;
+    const claimController = new AbortController();
+    activeClaimController = claimController;
     try {
-      const job = await claim();
+      const job = await claim(claimController.signal);
+      if (stopped || claimController.signal.aborted) return { stopped: true, reason: "runner stopped during claim" };
       if (!job) return null;
 
       const taskController = new AbortController();
@@ -308,6 +315,7 @@ export function createInternalRunner({
       logger.log(NAME, job.id, result?.ok ? "ok" : "deny", result?.note || "");
       return completed;
     } finally {
+      activeClaimController = null;
       activeTaskController = null;
       activeHeartbeatController = null;
       tickRunning = false;
@@ -316,6 +324,7 @@ export function createInternalRunner({
 
   function start() {
     if (interval !== null) return;
+    stopped = false;
     logger.log("internal runner " + NAME + " polling " + COORDINATOR + " allow=" + [...ALLOWED].join(","));
     interval = setIntervalImpl(() => {
       tick().catch(error => logger.error(NAME, error.message));
@@ -324,10 +333,12 @@ export function createInternalRunner({
   }
 
   function stop() {
+    stopped = true;
     if (interval !== null) {
       clearIntervalImpl(interval);
       interval = null;
     }
+    activeClaimController?.abort(new Error("runner stopping"));
     activeTaskController?.abort(new Error("runner stopping"));
     activeHeartbeatController?.abort();
   }
