@@ -364,6 +364,32 @@ test("shutdown during a pending claim cannot start work after claim resolves", a
   assert.equal((await runner.tick()).stopped, true);
 });
 
+test("workspace search skips credentials, private keys, hidden files, and oversized files", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-internal-runner-secret-filter-"));
+  try {
+    fs.writeFileSync(path.join(root, "visible.txt"), "the needle is visible");
+    fs.writeFileSync(path.join(root, "secret.txt"), "the needle is secret");
+    fs.writeFileSync(path.join(root, "grok-private.pem"), "the needle is private");
+    fs.writeFileSync(path.join(root, ".hidden.txt"), "the needle is hidden");
+    fs.mkdirSync(path.join(root, "secrets"));
+    fs.mkdirSync(path.join(root, "credentials"));
+    fs.writeFileSync(path.join(root, "secrets", "token.txt"), "the needle is in secrets");
+    fs.writeFileSync(path.join(root, "credentials", "cloud.json"), "the needle is in credentials");
+    fs.writeFileSync(path.join(root, "oversized.txt"), "needle".repeat(100));
+
+    const hits = walkHits(root, "needle", [], { root, maxFiles: 100, maxFileBytes: 64 });
+    assert.deepEqual(hits, [{ type: "file", path: "visible.txt" }]);
+
+    const limited = walkHits(root, "needle", [], { root, maxFiles: 1, maxFileBytes: 64 });
+    assert.ok(limited.length <= 1);
+    assert.ok(limited.every(hit => hit.path === "visible.txt"));
+    assert.throws(() => walkHits(root, "needle", [], { root, maxFiles: 0 }), /positive safe integers/);
+    assert.throws(() => walkHits(root, "needle", [], { root, maxFileBytes: -1 }), /positive safe integers/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workspace search walk exits promptly when its lease signal is already aborted", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-internal-runner-abort-walk-"));
   try {
