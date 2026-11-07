@@ -63,6 +63,79 @@ test("runner lease configuration rejects unsafe heartbeat and lease values", () 
   assert.throws(() => validateRunnerConfig(env({ POLL_MS: "1.5" })), /POLL_MS/);
 });
 
+test("runner rejects unsafe coordinator URLs and normalizes a valid base path", () => {
+  for (const url of [
+    "ftp://coordinator:4100",
+    "https://user:password@coordinator:4100",
+    "https://coordinator:4100?token=secret",
+    "https://coordinator:4100/#fragment",
+    "not a URL",
+  ]) {
+    assert.throws(
+      () => createInternalRunner({ env: env({ COORDINATOR_URL: url }), fetchImpl: async () => jsonResponse(204, {}) }),
+      /COORDINATOR_URL/,
+      url,
+    );
+  }
+  const runner = createInternalRunner({
+    env: env({ COORDINATOR_URL: "https://coordinator.example/base///" }),
+    fetchImpl: async () => jsonResponse(204, {}),
+    logger: { log() {}, warn() {}, error() {} },
+  });
+  assert.equal(runner.config.coordinatorUrl, "https://coordinator.example/base");
+  runner.stop();
+});
+
+test("claim rejects malformed job identity, runner identity, token, and lease expiry", async () => {
+  const invalidClaims = [
+    { ...claimedJob(), id: "../escape" },
+    { ...claimedJob(), runner: "another-runner" },
+    { ...claimedJob(), claimToken: "short" },
+    { ...claimedJob(), leaseExpiresAt: NaN },
+    { ...claimedJob(), leaseExpiresAt: Date.now() - 1 },
+  ];
+  for (const invalid of invalidClaims) {
+    const runner = createInternalRunner({
+      env: env(),
+      fetchImpl: async () => jsonResponse(200, invalid),
+      logger: { log() {}, warn() {}, error() {} },
+    });
+    await assert.rejects(() => runner.claim(), /invalid runner claim/);
+    runner.stop();
+  }
+  const emptyRunner = createInternalRunner({
+    env: env(),
+    fetchImpl: async () => new Response(null, { status: 204 }),
+    logger: { log() {}, warn() {}, error() {} },
+  });
+  assert.equal(await emptyRunner.claim(), null);
+  emptyRunner.stop();
+});
+
+test("renew rejects wrong server identity, stale expiry, and non-success responses", async () => {
+  const job = claimedJob();
+  for (const body of [
+    { id: "run-other", runner: RUNNER_NAME, leaseExpiresAt: Date.now() + 10000 },
+    { id: job.id, runner: "another-runner", leaseExpiresAt: Date.now() + 10000 },
+    { id: job.id, runner: RUNNER_NAME, leaseExpiresAt: Date.now() - 1 },
+  ]) {
+    const runner = createInternalRunner({
+      env: env(),
+      fetchImpl: async () => jsonResponse(200, body),
+      logger: { log() {}, warn() {}, error() {} },
+    });
+    await assert.rejects(() => runner.renew(job), /invalid renewed lease/);
+    runner.stop();
+  }
+  const failed = createInternalRunner({
+    env: env(),
+    fetchImpl: async () => jsonResponse(409, { error: "expired" }),
+    logger: { log() {}, warn() {}, error() {} },
+  });
+  await assert.rejects(() => failed.renew(job), /renewal rejected/);
+  failed.stop();
+});
+
 test("runner renews long-running work and a single process never overlaps ticks", async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-internal-runner-heartbeat-"));
   fs.writeFileSync(path.join(root, "needle.txt"), "needle");
