@@ -45,10 +45,15 @@ function delay(ms, signal, setTimeoutImpl = setTimeout, clearTimeoutImpl = clear
 }
 
 function validateCoordinatorUrl(raw) {
-  const parsed = new URL(String(raw || "http://127.0.0.1:4100"));
+  let parsed;
+  try {
+    parsed = new URL(String(raw || "http://127.0.0.1:4100"));
+  } catch {
+    throw new TypeError("COORDINATOR_URL must be a valid HTTP(S) URL without credentials, query, or fragment");
+  }
   if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password
       || parsed.search || parsed.hash) {
-    throw new TypeError("COORDINATOR_URL must be an HTTP(S) URL without credentials, query, or fragment");
+    throw new TypeError("COORDINATOR_URL must be a valid HTTP(S) URL without credentials, query, or fragment");
   }
   return parsed.toString().replace(/\/+$/, "");
 }
