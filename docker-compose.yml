@@ -115,12 +115,16 @@ services:
       POLL_MS: ${POLL_MS:-3000}
     volumes:
       - ${SWARM_WORKSPACE_HOST_PATH:-.}:/workspace:ro
+    user: "65532:65532"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1.0
     depends_on:
       coordinator:
         condition: service_healthy
