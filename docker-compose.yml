@@ -109,9 +109,18 @@ services:
       SWARM_READ_TOKEN: ${SWARM_READ_TOKEN}
       SWARM_RUNNER_TOKEN: ${SWARM_RUNNER_TOKEN}
       INTERNAL_RUNNER_NAME: ${INTERNAL_RUNNER_NAME:-control12-internal-1}
+      SWARM_ROOT: /workspace
       RUNNER_LEASE_MS: ${RUNNER_LEASE_MS:-30000}
       RUNNER_HEARTBEAT_MS: ${RUNNER_HEARTBEAT_MS:-10000}
       POLL_MS: ${POLL_MS:-3000}
+    volumes:
+      - ${SWARM_WORKSPACE_HOST_PATH:-.}:/workspace:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       coordinator:
         condition: service_healthy
