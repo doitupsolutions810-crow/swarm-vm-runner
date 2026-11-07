@@ -59,14 +59,24 @@ function validateCoordinatorUrl(raw) {
 }
 
 export function walkHits(dir, needle, acc = [], {
-  fsImpl = fs, pathImpl = path, root = dir, signal, depth = 0, maxDepth = 6, maxHits = 20,
+  fsImpl = fs, pathImpl = path, root = dir, signal, depth = 0,
+  maxDepth = 6, maxHits = 20, maxFiles = 500, maxFileBytes = 1_048_576,
+  visited = { files: 0 },
 } = {}) {
-  if (signal?.aborted || acc.length >= maxHits || depth > maxDepth) return acc;
+  if (!Number.isSafeInteger(maxDepth) || maxDepth < 0
+      || !Number.isSafeInteger(maxHits) || maxHits < 1
+      || !Number.isSafeInteger(maxFiles) || maxFiles < 1
+      || !Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1) {
+    throw new RangeError("search traversal limits must be positive safe integers");
+  }
+  if (signal?.aborted || acc.length >= maxHits || depth > maxDepth || visited.files >= maxFiles) return acc;
   let entries = [];
   try { entries = fsImpl.readdirSync(dir, { withFileTypes: true }); } catch { return acc; }
   for (const ent of entries) {
-    if (signal?.aborted || acc.length >= maxHits) break;
-    if (ent.name === "node_modules" || ent.name === ".git" || ent.name.startsWith(".")) continue;
+    if (signal?.aborted || acc.length >= maxHits || visited.files >= maxFiles) break;
+    const entryName = ent.name.toLowerCase();
+    if (ent.name.startsWith(".")
+        || ["node_modules", ".git", "secrets", "secret", "credentials", "credential", "run-secrets"].includes(entryName)) continue;
     const full = pathImpl.join(dir, ent.name);
     if (ent.isDirectory()) {
       if (ent.name.toLowerCase().includes(needle.toLowerCase())) {
@@ -74,9 +84,17 @@ export function walkHits(dir, needle, acc = [], {
       }
       walkHits(full, needle, acc, {
         fsImpl, pathImpl, root, signal, depth: depth + 1, maxDepth, maxHits,
+        maxFiles, maxFileBytes, visited,
       });
     } else if (ent.isFile()) {
+      visited.files += 1;
       const rel = pathImpl.relative(root, full);
+      if (/(?:^|\\/)(?:secrets?|credentials?|run-secrets)(?:\\/|$)/i.test(rel)
+          || /(?:^|[._-])(?:id_rsa|id_ed25519|credentials?)(?:[._-]|$)/i.test(ent.name)
+          || /\\.(?:pem|key|p12|pfx|kdbx|keystore)$/i.test(ent.name)) continue;
+      let stat;
+      try { stat = fsImpl.statSync(full); } catch { continue; }
+      if (!Number.isFinite(stat.size) || stat.size > maxFileBytes) continue;
       let hit = rel.toLowerCase().includes(needle.toLowerCase());
       if (!hit && /\.(js|mjs|md|yml|json|sh|html|txt)$/i.test(ent.name)) {
         try {
