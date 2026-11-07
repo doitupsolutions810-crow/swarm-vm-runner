@@ -206,6 +206,43 @@ test("spawn-subagent retries reuse one stable idempotency key after an ambiguous
   }
 });
 
+test("shutdown during a pending claim cannot start work after claim resolves", async () => {
+  let resolveClaim;
+  let claimStarted = false;
+  let claimSignal;
+  let executionCalls = 0;
+  let completionCalls = 0;
+  const fetchImpl = async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === "/api/runner/claim") {
+      claimStarted = true;
+      claimSignal = options.signal;
+      return new Promise(resolve => {
+        resolveClaim = () => resolve(jsonResponse(200, claimedJob("inventory")));
+      });
+    }
+    if (parsed.pathname === "/api/runner/complete") {
+      completionCalls += 1;
+      return jsonResponse(200, { status: "completed" });
+    }
+    executionCalls += 1;
+    throw new Error("unexpected post-claim request: " + parsed.pathname);
+  };
+  const runner = createInternalRunner({ env: env(), fetchImpl, logger: { log() {}, warn() {}, error() {} } });
+
+  const pending = runner.tick();
+  await waitFor(() => claimStarted && typeof resolveClaim === "function");
+  runner.stop();
+  assert.equal(claimSignal.aborted, true);
+  resolveClaim();
+
+  const result = await pending;
+  assert.equal(result.stopped, true);
+  assert.equal(executionCalls, 0);
+  assert.equal(completionCalls, 0);
+  assert.equal((await runner.tick()).stopped, true);
+});
+
 test("workspace search walk exits promptly when its lease signal is already aborted", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-internal-runner-abort-walk-"));
   try {
