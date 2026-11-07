@@ -89,9 +89,9 @@ export function walkHits(dir, needle, acc = [], {
     } else if (ent.isFile()) {
       visited.files += 1;
       const rel = pathImpl.relative(root, full);
-      if (/(?:^|\\/)(?:secrets?|credentials?|run-secrets)(?:\\/|$)/i.test(rel)
+      if (/(?:^|\/)(?:secrets?|credentials?|run-secrets)(?:\/|$)/i.test(rel)
           || /(?:^|[._-])(?:id_rsa|id_ed25519|credentials?)(?:[._-]|$)/i.test(ent.name)
-          || /\\.(?:pem|key|p12|pfx|kdbx|keystore)$/i.test(ent.name)) continue;
+          || /\.(?:pem|key|p12|pfx|kdbx|keystore)$/i.test(ent.name)) continue;
       let stat;
       try { stat = fsImpl.statSync(full); } catch { continue; }
       if (!Number.isFinite(stat.size) || stat.size > maxFileBytes) continue;
