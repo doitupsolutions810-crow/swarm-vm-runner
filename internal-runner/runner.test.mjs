@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createServer as createHttpServer } from "node:http";
 import { createInternalRunner, validateRunnerConfig, walkHits } from "./runner.mjs";
 
 const TOKEN = "runner-test-token-" + "r".repeat(40);
@@ -277,6 +278,100 @@ test("spawn-subagent retries reuse one stable idempotency key after an ambiguous
   } finally {
     runner.stop();
   }
+});
+
+test("runner uses real HTTP claim, heartbeat, idempotent spawn, and completion endpoints", async t => {
+  const calls = { claim: 0, renew: 0, spawn: 0, complete: 0 };
+  const children = new Map();
+  let observedKey = null;
+  let observedObjective = null;
+  const server = createHttpServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const raw = Buffer.concat(chunks).toString("utf8");
+    const body = raw ? JSON.parse(raw) : {};
+    const respond = (status, value) => {
+      const json = JSON.stringify(value);
+      res.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(json),
+      });
+      res.end(json);
+    };
+    try {
+      if (req.method === "POST" && req.url === "/api/runner/claim") {
+        calls.claim += 1;
+        assert.equal(req.headers.authorization, "Bearer " + TOKEN);
+        assert.equal(body.runner, RUNNER_NAME);
+        return respond(200, {
+          ...claimedJob("spawn-subagent"),
+          id: "run-http-1",
+          objective: "HTTP spawn integration",
+          leaseExpiresAt: Date.now() + 5000,
+        });
+      }
+      if (req.method === "POST" && req.url === "/api/runner/renew") {
+        calls.renew += 1;
+        assert.equal(req.headers.authorization, "Bearer " + TOKEN);
+        assert.equal(body.id, "run-http-1");
+        assert.equal(body.runner, RUNNER_NAME);
+        assert.equal(body.claimToken, CLAIM_TOKEN);
+        return respond(200, {
+          id: "run-http-1", runner: RUNNER_NAME, leaseExpiresAt: Date.now() + 5000,
+        });
+      }
+      if (req.method === "POST" && req.url === "/api/jobs") {
+        calls.spawn += 1;
+        assert.equal(req.headers.authorization, "Bearer " + API_TOKEN);
+        observedKey = req.headers["idempotency-key"];
+        observedObjective = body.objective;
+        let child = children.get(observedKey);
+        let status = 200;
+        if (!child) {
+          child = { id: "job-http-child", chain: ["debugger", "coder", "tester", "governance"] };
+          children.set(observedKey, child);
+          status = 202;
+        }
+        // Keep the actual HTTP request open long enough to require a heartbeat.
+        await new Promise(resolve => setTimeout(resolve, 350));
+        return respond(status, { ...child, idempotent_replay: status === 200 });
+      }
+      if (req.method === "POST" && req.url === "/api/runner/complete") {
+        calls.complete += 1;
+        assert.equal(req.headers.authorization, "Bearer " + TOKEN);
+        assert.equal(body.id, "run-http-1");
+        assert.equal(body.runner, RUNNER_NAME);
+        assert.equal(body.claimToken, CLAIM_TOKEN);
+        assert.equal(body.ok, true);
+        assert.equal(body.spawned.id, "job-http-child");
+        return respond(200, { id: body.id, status: "completed" });
+      }
+      return respond(404, { error: "not found" });
+    } catch (error) {
+      return respond(500, { error: error.message });
+    }
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const coordinatorUrl = "http://127.0.0.1:" + server.address().port;
+  const runner = createInternalRunner({
+    env: env({ COORDINATOR_URL: coordinatorUrl }),
+    logger: { log() {}, warn() {}, error() {} },
+  });
+  t.after(async () => {
+    runner.stop();
+    server.closeAllConnections?.();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+  });
+
+  const result = await runner.tick();
+  assert.equal(result.status, "completed");
+  assert.equal(calls.claim, 1);
+  assert.ok(calls.renew >= 1);
+  assert.equal(calls.spawn, 1);
+  assert.equal(calls.complete, 1);
+  assert.equal(observedKey, "spawn:run-http-1");
+  assert.equal(observedObjective, "HTTP spawn integration");
+  assert.equal(children.size, 1);
 });
 
 test("ambiguous child creation keeps parent retryable and reconciles the same idempotency key", async () => {
