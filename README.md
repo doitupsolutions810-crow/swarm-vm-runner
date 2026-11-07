@@ -47,8 +47,13 @@ stale claim token. Runner polling is single-flight, so one process never claims
 multiple jobs concurrently. The `spawn-subagent` action uses a durable
 `Idempotency-Key` derived from the parent runner job ID, so replay after an
 ambiguous network outcome returns the same child job instead of creating a
-duplicate. The `/api/jobs` idempotency contract rejects reuse of a key with a
-different normalized objective and persists the key in the coordinator journal.
+duplicate. When child creation times out, returns a retryable server response,
+or its response cannot be parsed, the parent is deliberately left incomplete:
+its heartbeat stops, the lease expires, and the next claimant retries the
+identical key. Definite authorization or idempotency conflicts are completed
+as failures instead of being retried forever. The `/api/jobs` idempotency
+contract rejects reuse of a key with a different normalized objective and
+persists the key in the coordinator journal.
 
 The internal runner reads the settings `RUNNER_LEASE_MS`, `RUNNER_HEARTBEAT_MS`,
 and `POLL_MS` from the Compose environment. Keep the heartbeat safely below
