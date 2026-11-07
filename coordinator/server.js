@@ -176,12 +176,26 @@ export function createServer({
       const record = JSON.parse(line);
       if (record.type === "job" && record.job && typeof record.job.id === "string") {
         jobs.set(record.job.id, record.job);
-        if (typeof record.job.idempotencyKey === "string" && typeof record.job.idempotencyDigest === "string") {
-          const prior = jobIdempotency.get(record.job.idempotencyKey);
-          if (prior && (prior.jobId !== record.job.id || prior.digest !== record.job.idempotencyDigest)) {
+        const hasIdempotencyKey = Object.hasOwn(record.job, "idempotencyKey");
+        const hasIdempotencyDigest = Object.hasOwn(record.job, "idempotencyDigest");
+        if (hasIdempotencyKey !== hasIdempotencyDigest) {
+          throw new Error("coordinator journal contains incomplete job idempotency metadata");
+        }
+        if (hasIdempotencyKey) {
+          const idempotencyKey = record.job.idempotencyKey;
+          const idempotencyDigest = record.job.idempotencyDigest;
+          if (typeof idempotencyKey !== "string" || idempotencyKey.length < 1 || idempotencyKey.length > 128
+              || !/^[A-Za-z0-9_.:-]+$/.test(idempotencyKey)
+              || typeof idempotencyDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(idempotencyDigest)
+              || typeof record.job.tenant !== "string" || typeof record.job.objective !== "string"
+              || digestJson({ tenant: record.job.tenant, objective: record.job.objective.trim() }) !== idempotencyDigest) {
+            throw new Error("coordinator journal contains invalid job idempotency metadata");
+          }
+          const prior = jobIdempotency.get(idempotencyKey);
+          if (prior && (prior.jobId !== record.job.id || prior.digest !== idempotencyDigest)) {
             throw new Error("coordinator journal contains conflicting job idempotency records");
           }
-          jobIdempotency.set(record.job.idempotencyKey, { jobId: record.job.id, digest: record.job.idempotencyDigest });
+          jobIdempotency.set(idempotencyKey, { jobId: record.job.id, digest: idempotencyDigest });
         }
         const n = Number(record.job.id.replace(/^job-/, ""));
         if (Number.isSafeInteger(n)) seq = Math.max(seq, n + 1);
