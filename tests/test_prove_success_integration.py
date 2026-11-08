@@ -80,7 +80,7 @@ def make_project(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     docker = fake_bin / "docker"
-    docker.write_text("#!/bin/sh\nprintf '%s\\n' " + " ".join(SERVICES) + "\n")
+    docker.write_text("#!/bin/sh\nprintf '%s\n' " + " ".join(SERVICES) + "\n")
     docker.chmod(0o755)
     return fake_bin
 
@@ -155,7 +155,7 @@ def test_missing_required_role_worker_fails_before_coordinator_health_check(tmp_
     fake_bin = make_project(tmp_path)
     docker = fake_bin / "docker"
     docker.write_text(
-        "#!/bin/sh\\nprintf '%s\\\\n' redis coordinator worker-debugger worker-coder worker-tester\\n"
+        "#!/bin/sh\nprintf '%s\\\n' redis coordinator worker-debugger worker-coder worker-tester\n"
     )
     docker.chmod(0o755)
     server, thread = start_server(state)
@@ -175,7 +175,7 @@ def test_docker_compose_nonzero_exit_fails_closed_before_network_calls(tmp_path)
     state = State()
     fake_bin = make_project(tmp_path)
     docker = fake_bin / "docker"
-    docker.write_text("#!/bin/sh\\necho compose unavailable >&2\\nexit 17\\n")
+    docker.write_text("#!/bin/sh\necho compose unavailable >&2\nexit 17\n")
     docker.chmod(0o755)
     server, thread = start_server(state)
     try:
