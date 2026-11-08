@@ -188,3 +188,33 @@ def test_docker_compose_nonzero_exit_fails_closed_before_network_calls(tmp_path)
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_missing_docker_cli_fails_closed_before_coordinator_network(tmp_path):
+    state = State()
+    fake_bin = make_project(tmp_path)
+    (fake_bin / "docker").unlink()
+    server, thread = start_server(state)
+    env = os.environ.copy()
+    env["COORDINATOR_URL"] = f"http://127.0.0.1:{server.server_port}"
+    env["PROVE_SUCCESS_WAIT_SECONDS"] = "5"
+    # Hide the host's Docker binary as well as the fixture binary.
+    env["PATH"] = str(fake_bin)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(tmp_path / "scripts" / "prove-success-strict.py")],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert "Docker CLI unavailable" in result.stdout
+        assert "coordinator and Redis health verified" not in result.stdout
+        assert state.jobs == []
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
