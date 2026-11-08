@@ -35,9 +35,10 @@ jobs:
         run: python -m pip install --upgrade pytest
       - name: Compile proof code
         run: python -m compileall -q scripts tests
-      - name: Run strict proof unit and mock-coordinator tests
+      - name: Run strict proof unit, mock-coordinator, and adversarial tests
         run: >-
           python -m pytest -q
           tests/test_prove_success.py
           tests/test_prove_success_integration.py
           tests/test_prove_success_hardening.py
+          tests/test_prove_success_adversarial.py
