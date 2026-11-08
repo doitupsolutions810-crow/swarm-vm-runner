@@ -148,3 +148,43 @@ def test_completed_target_with_wrong_role_order_is_rejected(tmp_path):
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_missing_required_role_worker_fails_before_coordinator_health_check(tmp_path):
+    state = State()
+    fake_bin = make_project(tmp_path)
+    docker = fake_bin / "docker"
+    docker.write_text(
+        "#!/bin/sh\\nprintf '%s\\\\n' redis coordinator worker-debugger worker-coder worker-tester\\n"
+    )
+    docker.chmod(0o755)
+    server, thread = start_server(state)
+    try:
+        result = run_proof(tmp_path, fake_bin, server)
+        assert result.returncode == 1
+        assert "worker-governance" in result.stdout
+        assert "coordinator and Redis health verified" not in result.stdout
+        assert "SYSTEM NOT VERIFIED" in result.stdout
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_docker_compose_nonzero_exit_fails_closed_before_network_calls(tmp_path):
+    state = State()
+    fake_bin = make_project(tmp_path)
+    docker = fake_bin / "docker"
+    docker.write_text("#!/bin/sh\\necho compose unavailable >&2\\nexit 17\\n")
+    docker.chmod(0o755)
+    server, thread = start_server(state)
+    try:
+        result = run_proof(tmp_path, fake_bin, server)
+        assert result.returncode == 1
+        assert "docker compose ps failed" in result.stdout
+        assert "coordinator and Redis health verified" not in result.stdout
+        assert "SYSTEM SUCCESS" not in result.stdout
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
