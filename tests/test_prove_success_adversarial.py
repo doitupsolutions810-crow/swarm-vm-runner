@@ -148,7 +148,7 @@ def test_request_json_refuses_cross_origin_redirect_without_contacting_target():
     origin_thread = threading.Thread(target=origin.serve_forever, daemon=True)
     origin_thread.start()
     try:
-        with pytest.raises(ProofError):
+        with pytest.raises(strict_proof.ProofError):
             strict_proof.request_json(
                 f"http://127.0.0.1:{origin.server_port}", "/redirect"
             )
@@ -171,5 +171,5 @@ def test_request_json_refuses_cross_origin_redirect_without_contacting_target():
     ("http://127.0.0.1:4100", "https://evil.example/path"),
 ])
 def test_request_json_rejects_credentialed_or_nonlocal_request_shapes(base, path):
-    with pytest.raises(ProofError):
+    with pytest.raises(strict_proof.ProofError):
         strict_proof.request_json(base, path)
