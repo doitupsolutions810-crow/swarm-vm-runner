@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib.util
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import subprocess
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -55,7 +57,11 @@ def test_request_rejects_unsafe_or_malformed_coordinator_urls(url):
         strict_proof.request_json(url, "/health")
 
 
-@pytest.mark.parametrize("path", ["health", "https://elsewhere.invalid/x", "//elsewhere.invalid/x"])
+@pytest.mark.parametrize("path", [
+    "health", "https://elsewhere.invalid/x", "//elsewhere.invalid/x",
+    "/api/../health", "/api/%2e%2e/health", "/api/%2F..%2Fhealth",
+    "/health?token=x", "/health#fragment",
+])
 def test_request_rejects_nonlocal_api_paths(path):
     with pytest.raises(StrictProofError):
         strict_proof.request_json("http://127.0.0.1:1", path)
@@ -70,6 +76,8 @@ def response_server():
         def do_GET(self):
             if self.path == "/json":
                 body, status = b'{"ok":true}', 200
+            elif self.path == "/empty":
+                body, status = b"", 200
             elif self.path == "/invalid-json":
                 body, status = b'{not-json', 200
             elif self.path == "/invalid-utf8":
@@ -102,12 +110,68 @@ def response_server():
         server.server_close()
 
 
+
+def test_request_timeout_is_bounded(monkeypatch):
+    class SlowHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_GET(self):
+            time.sleep(0.25)
+            try:
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+            except OSError:
+                pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SlowHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(strict_proof, "REQUEST_TIMEOUT", 0.02)
+    started = time.monotonic()
+    try:
+        with pytest.raises(StrictProofError):
+            strict_proof.request_json(f"http://127.0.0.1:{server.server_port}", "/slow")
+        assert time.monotonic() - started < 1.0
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_compose_timeout_fails_closed_before_network(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "project"
+    scripts = root / "scripts"
+    runner = root / "runner"
+    scripts.mkdir(parents=True)
+    runner.mkdir()
+    (root / "docker-compose.yml").write_text("services: {}\n")
+    (runner / "entrypoint.sh").write_text("FAIL_CLOSED GITHUB_REPOSITORY GITHUB_RUNNER_TOKEN\n")
+    monkeypatch.setattr(strict_proof, "__file__", str(scripts / "prove-success-strict.py"))
+    monkeypatch.setattr(strict_proof, "COMPOSE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(strict_proof.shutil, "which", lambda _name: "/usr/bin/docker")
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(strict_proof.subprocess, "run", timeout)
+    monkeypatch.setattr(strict_proof, "request_json", lambda *_args, **_kwargs: pytest.fail("network contacted"))
+    monkeypatch.setenv("COORDINATOR_URL", "http://127.0.0.1:1")
+    assert strict_proof.main() == 1
+    output = capsys.readouterr().out
+    assert "docker compose ps could not complete" in output
+    assert "SYSTEM NOT VERIFIED" in output
+    assert "SYSTEM SUCCESS" not in output
+
 def test_request_returns_decoded_json_for_success(response_server):
     assert strict_proof.request_json(response_server, "/json") == (200, {"ok": True})
 
 
 @pytest.mark.parametrize("path", [
-    "/invalid-json", "/invalid-utf8", "/too-large", "/unavailable", "/redirect"
+    "/invalid-json", "/invalid-utf8", "/empty", "/too-large", "/unavailable", "/redirect"
 ])
 def test_request_normalizes_malformed_oversized_http_and_redirect_responses(response_server, path):
     with pytest.raises(StrictProofError):

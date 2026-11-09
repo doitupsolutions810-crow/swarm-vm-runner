@@ -58,6 +58,10 @@ def test_find_job_requires_exactly_one_matching_job_id():
         find_job({"jobs": []}, "target-job")
     with pytest.raises(ProofError):
         find_job({"jobs": [job, dict(job)]}, "target-job")
+    conflicting = dict(job)
+    conflicting["status"] = "failed"
+    with pytest.raises(ProofError):
+        find_job({"jobs": [job, conflicting]}, "target-job")
 
 
 @pytest.mark.parametrize("mutation", [
@@ -70,6 +74,7 @@ def test_find_job_requires_exactly_one_matching_job_id():
     lambda job: job["events"][0].update(status="failed"),
     lambda job: job["events"][1].update(role="debugger"),
     lambda job: job["events"][2].update(status="queued"),
+    lambda job: job.update(events=job["events"] + [{"role": "auditor", "status": "passed"}]),
     lambda job: job.update(events=[None] + job["events"][1:]),
 ])
 def test_completed_role_chain_rejects_partial_duplicate_or_forged_chains(mutation):
@@ -99,6 +104,12 @@ def test_health_gate_requires_literal_coordinator_and_redis_booleans(health):
     assert health_is_ready(health) is False
 
 
+
+@pytest.mark.parametrize("missing_service", sorted(REQUIRED_SERVICES))
+def test_each_required_service_is_individually_mandatory(missing_service):
+    running = set(REQUIRED_SERVICES) - {missing_service}
+    assert missing_required_services(running) == [missing_service]
+
 def test_service_gate_requires_every_named_worker_and_rejects_no_implicit_aliases():
     assert missing_required_services(set()) == sorted(REQUIRED_SERVICES)
     assert missing_required_services(set(REQUIRED_SERVICES)) == []
@@ -106,8 +117,9 @@ def test_service_gate_requires_every_named_worker_and_rejects_no_implicit_aliase
     assert missing_required_services(missing) == ["worker-governance"]
     # Similar names and a generic worker must not substitute for the required role.
     aliases = set(REQUIRED_SERVICES) - {"worker-governance"}
-    aliases.update({"governance", "worker", "worker-governance-old"})
+    aliases.update({"governance", "worker", "worker-governance-old", "worker-auditor", "metrics"})
     assert missing_required_services(aliases) == ["worker-governance"]
+    assert missing_required_services(set(REQUIRED_SERVICES) | {"worker-auditor", "metrics"}) == []
 
 
 def test_running_service_parser_trims_lines_and_deduplicates():

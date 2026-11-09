@@ -14,6 +14,7 @@ SERVICES = ["redis", "coordinator", "worker-debugger", "worker-coder", "worker-t
 
 
 class State:
+    health_calls = 0
     target_status = "completed"
     target_events = [{"role": role, "status": "passed"} for role in ROLES]
     jobs = []
@@ -34,6 +35,7 @@ def start_server(state):
 
         def do_GET(self):
             if self.path == "/health":
+                state.health_calls += 1
                 return self.reply(200, {"ok": True, "redis": True})
             if self.path == "/api/jobs":
                 return self.reply(200, {"jobs": state.jobs})
@@ -164,6 +166,8 @@ def test_missing_required_role_worker_fails_before_coordinator_health_check(tmp_
         assert result.returncode == 1
         assert "worker-governance" in result.stdout
         assert "coordinator and Redis health verified" not in result.stdout
+        assert state.health_calls == 0
+        assert state.jobs == []
         assert "SYSTEM NOT VERIFIED" in result.stdout
     finally:
         server.shutdown()
@@ -183,6 +187,8 @@ def test_docker_compose_nonzero_exit_fails_closed_before_network_calls(tmp_path)
         assert result.returncode == 1
         assert "docker compose ps failed" in result.stdout
         assert "coordinator and Redis health verified" not in result.stdout
+        assert state.health_calls == 0
+        assert state.jobs == []
         assert "SYSTEM SUCCESS" not in result.stdout
     finally:
         server.shutdown()
@@ -213,6 +219,7 @@ def test_missing_docker_cli_fails_closed_before_coordinator_network(tmp_path):
         assert result.returncode == 1
         assert "Docker CLI unavailable" in result.stdout
         assert "coordinator and Redis health verified" not in result.stdout
+        assert state.health_calls == 0
         assert state.jobs == []
     finally:
         server.shutdown()

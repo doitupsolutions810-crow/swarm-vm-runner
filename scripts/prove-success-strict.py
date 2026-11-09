@@ -11,7 +11,7 @@ import uuid
 from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from prove_success import (
@@ -26,6 +26,7 @@ from prove_success import (
 )
 
 REQUEST_TIMEOUT = 5
+COMPOSE_TIMEOUT_SECONDS = 10
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
@@ -59,13 +60,26 @@ def request_json(base: str, path: str, method: str = "GET", payload=None):
         raise ProofError(
             "COORDINATOR_URL must be an absolute HTTP(S) URL without credentials, query, or fragment"
         )
-    if (
-        not isinstance(path, str)
-        or not path.startswith("/")
-        or path.startswith("//")
-        or "://" in path
-    ):
+    if not isinstance(path, str):
         raise ProofError("coordinator path must be an absolute local API path")
+    parsed_path = urlsplit(path)
+    try:
+        decoded_path = unquote(parsed_path.path, errors="strict")
+    except (UnicodeError, ValueError) as exc:
+        raise ProofError("coordinator path contains invalid escaping") from exc
+    if (
+        not parsed_path.path.startswith("/")
+        or parsed_path.path.startswith("//")
+        or parsed_path.scheme
+        or parsed_path.netloc
+        or parsed_path.query
+        or parsed_path.fragment
+        or "://" in path
+        or "\\" in decoded_path
+        or "\x00" in decoded_path
+        or any(segment in {".", ".."} for segment in decoded_path.split("/"))
+    ):
+        raise ProofError("coordinator path must be an absolute local API path without traversal")
 
     try:
         data = json.dumps(payload, allow_nan=False).encode("utf-8") if payload is not None else None
@@ -121,7 +135,7 @@ def main() -> int:
                 cwd=str(root),
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=COMPOSE_TIMEOUT_SECONDS,
                 check=False,
             )
             if ps.returncode != 0:
