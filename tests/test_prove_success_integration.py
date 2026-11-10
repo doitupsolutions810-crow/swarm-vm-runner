@@ -82,7 +82,12 @@ def make_project(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     docker = fake_bin / "docker"
-    docker.write_text("#!/bin/sh\nprintf '%s\n' " + " ".join(SERVICES) + "\n")
+    docker.write_text(
+        "#!/bin/sh\n"
+        + "if [ \"$2\" = \"ps\" ]; then printf '%s\\n' " + " ".join(SERVICES) + "; "
+        + "elif [ \"$2\" = \"exec\" ]; then printf 'PONG\\n'; "
+        + "else exit 99; fi\n"
+    )
     docker.chmod(0o755)
     return fake_bin
 
@@ -113,6 +118,31 @@ def test_strict_proof_accepts_exact_four_role_target_job(tmp_path):
         assert "job-target" in result.stdout
         assert "target job completed debugger -> coder -> tester -> governance" in result.stdout
         assert "SYSTEM SUCCESS" in result.stdout
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_redis_not_ready_fails_before_coordinator_network(tmp_path):
+    state = State()
+    fake_bin = make_project(tmp_path)
+    docker = fake_bin / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        + "if [ \"$2\" = \"ps\" ]; then printf '%s\\n' " + " ".join(SERVICES) + "; "
+        + "elif [ \"$2\" = \"exec\" ]; then echo LOADING; exit 1; "
+        + "else exit 99; fi\n"
+    )
+    docker.chmod(0o755)
+    server, thread = start_server(state)
+    try:
+        result = run_proof(tmp_path, fake_bin, server)
+        assert result.returncode == 1
+        assert "Redis readiness ping failed" in result.stdout
+        assert state.health_calls == 0
+        assert state.jobs == []
+        assert "SYSTEM SUCCESS" not in result.stdout
     finally:
         server.shutdown()
         thread.join(timeout=2)
