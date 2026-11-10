@@ -40,6 +40,21 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 _NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler)
 
 
+def _unique_json_object(pairs):
+    """Reject duplicate member names instead of silently accepting the last value."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object member: {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str):
+    """Reject JavaScript NaN/Infinity tokens, which are not valid JSON values."""
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
 def request_json(base: str, path: str, method: str = "GET", payload=None):
     """Make a bounded JSON request and normalize malformed/transport errors."""
     try:
@@ -93,14 +108,18 @@ def request_json(base: str, path: str, method: str = "GET", payload=None):
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ProofError(f"{path} response exceeded {MAX_RESPONSE_BYTES} bytes")
-            return response.status, json.loads(raw.decode("utf-8"))
+            return response.status, json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
     except HTTPError as exc:
         try:
             detail = exc.read(2048).decode("utf-8", "replace")
         finally:
             exc.close()
         raise ProofError(f"{path} returned HTTP {exc.code}: {detail}") from None
-    except (URLError, TimeoutError, OSError, ValueError, UnicodeError, HTTPException) as exc:
+    except (URLError, TimeoutError, OSError, ValueError, UnicodeError, HTTPException, RecursionError) as exc:
         raise ProofError(f"{path} unavailable or invalid: {exc}") from exc
 
 
