@@ -92,7 +92,7 @@ def response_server():
                 self.end_headers()
                 return
             elif self.path == "/deep-json":
-                body, status = b"[" * 2000 + b"0" + b"]" * 2000, 200
+                body, status = b"[" * 12000 + b"0" + b"]" * 12000, 200
             elif self.path == "/duplicate-key":
                 body, status = b'{"ok":true,"ok":false,"redis":true}', 200
             elif self.path == "/nonfinite":
