@@ -165,6 +165,23 @@ def main() -> int:
                     failed.append("required services not running: " + ", ".join(missing))
                 else:
                     passed.append("all required Compose services are running")
+                if not failed:
+                    try:
+                        redis_ping = subprocess.run(
+                            [docker, "compose", "exec", "-T", "redis", "redis-cli", "ping"],
+                            cwd=str(root),
+                            capture_output=True,
+                            text=True,
+                            timeout=COMPOSE_TIMEOUT_SECONDS,
+                            check=False,
+                        )
+                        if redis_ping.returncode != 0 or (redis_ping.stdout or "").strip() != "PONG":
+                            detail = (redis_ping.stderr or redis_ping.stdout or "").strip()
+                            failed.append("Redis readiness ping failed: " + (detail or "expected exact PONG"))
+                        else:
+                            passed.append("Redis readiness verified by redis-cli PING")
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        failed.append(f"Redis readiness ping could not complete: {exc}")
         except (OSError, subprocess.TimeoutExpired) as exc:
             failed.append(f"docker compose ps could not complete: {exc}")
 
