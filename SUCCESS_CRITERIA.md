@@ -11,11 +11,13 @@ Required success does **not** include GitHub-hosted runners.
 5. Runner entrypoint fail-closed if `GITHUB_RUNNER_TOKEN` or `GITHUB_REPOSITORY` is missing.
 
 The acceptance command `./scripts/prove-success.sh` is fail-closed. It requires all six
-core Compose services to be running, `/health` to report both coordinator and Redis
-ready, and the unique job created by the proof to complete with the exact ordered
-role chain debugger → coder → tester → governance. An unrelated completed job does
-not satisfy the gate. The target job has a bounded 120-second completion window;
-a missing coordinator, missing worker, or incomplete chain is NOT READY.
+core Compose services to be running, an independent `docker compose exec -T redis
+redis-cli ping` response of exactly `PONG`, `/health` to report literal-boolean
+coordinator and Redis readiness, and the unique job created by the proof to complete
+with the exact ordered role chain debugger → coder → tester → governance. An unrelated
+completed job does not satisfy the gate. The target job has a bounded 120-second
+completion window; a missing coordinator, missing worker, unavailable Redis, or
+incomplete chain is NOT READY.
 
 ## Degraded (allowed)
 
