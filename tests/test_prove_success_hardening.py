@@ -91,6 +91,12 @@ def response_server():
                 self.send_header("location", "/json")
                 self.end_headers()
                 return
+            elif self.path == "/deep-json":
+                body, status = b"[" * 2000 + b"0" + b"]" * 2000, 200
+            elif self.path == "/duplicate-key":
+                body, status = b'{"ok":true,"ok":false,"redis":true}', 200
+            elif self.path == "/nonfinite":
+                body, status = b'{"ok":true,"redis":true,"measurement":NaN}', 200
             else:
                 body, status = b'{"error":"not found"}', 404
             self.send_response(status)
@@ -171,7 +177,8 @@ def test_request_returns_decoded_json_for_success(response_server):
 
 
 @pytest.mark.parametrize("path", [
-    "/invalid-json", "/invalid-utf8", "/empty", "/too-large", "/unavailable", "/redirect"
+    "/invalid-json", "/invalid-utf8", "/empty", "/too-large", "/unavailable",
+    "/redirect", "/deep-json", "/duplicate-key", "/nonfinite"
 ])
 def test_request_normalizes_malformed_oversized_http_and_redirect_responses(response_server, path):
     with pytest.raises(StrictProofError):
